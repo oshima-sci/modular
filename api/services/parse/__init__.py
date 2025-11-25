@@ -2,6 +2,7 @@ from .grobid import GrobidParser
 from .handler import handle_parse_paper
 from .tei_processor import add_element_ids, extract_element_by_id, list_element_ids
 from .screenshots import extract_figure_screenshots, save_screenshots_to_bucket
+from .metadata_extractor import extract_metadata
 
 __all__ = [
     "GrobidParser",
@@ -11,4 +12,5 @@ __all__ = [
     "list_element_ids",
     "extract_figure_screenshots",
     "save_screenshots_to_bucket",
+    "extract_metadata",
 ]

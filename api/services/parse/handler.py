@@ -6,6 +6,7 @@ from db import get_supabase_client
 from services.parse.grobid import GrobidParser
 from services.parse.tei_processor import add_element_ids
 from services.parse.screenshots import extract_figure_screenshots, save_screenshots_to_bucket
+from services.parse.metadata_extractor import extract_metadata
 
 logger = logging.getLogger(__name__)
 
@@ -74,13 +75,41 @@ def handle_parse_paper(payload: dict[str, Any]) -> dict[str, Any]:
         figure_paths = save_screenshots_to_bucket(db, paper_id, screenshots, BUCKET_NAME)
         logger.info(f"Saved {len(figure_paths)} figure screenshots")
 
-    # 7. Update paper record with parsed_path
-    db.table("papers").update({"parsed_path": parsed_path}).eq("id", paper_id).execute()
-    logger.info(f"Updated paper {paper_id} with parsed_path={parsed_path}")
+    # 7. Extract metadata (title, abstract, references)
+    logger.info("Extracting metadata from TEI")
+    metadata = extract_metadata(tei_xml)
+    parsed_title = metadata.get("title")
+    logger.info(f"Extracted title: {parsed_title}, abstract: {bool(metadata.get('abstract'))}, refs: {len(metadata.get('references', []))}")
+
+    # 8. Update paper record with parsed_path, title, and metadata
+    update_data = {
+        "parsed_path": parsed_path,
+        "metadata": {
+            "abstract": metadata.get("abstract"),
+            "references": metadata.get("references", []),
+        }
+    }
+    if parsed_title:
+        update_data["title"] = parsed_title
+
+    db.table("papers").update(update_data).eq("id", paper_id).execute()
+    logger.info(f"Updated paper {paper_id} with parsed_path and metadata")
+
+    # TODO: Fix worker DSPy config, then uncomment this
+    # # 9. Create paper_extract job to run extractions
+    # logger.info("Creating paper_extract job")
+    # queue = JobQueue()
+    # extract_job = queue.create_job_by_type(
+    #     JobType.PAPER_EXTRACT,
+    #     payload={"paper_id": paper_id},
+    # )
+    # logger.info(f"Created paper_extract job: {extract_job.id}")
 
     return {
         "paper_id": paper_id,
         "parsed_path": parsed_path,
         "tei_size": len(tei_xml),
-        "figures_extracted": len(figure_paths)
+        "figures_extracted": len(figure_paths),
+        "title": parsed_title,
+        "references_count": len(metadata.get("references", [])),
     }

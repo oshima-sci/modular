@@ -82,13 +82,8 @@ class Worker:
         start_time = datetime.now()
 
         try:
-            # Run handler (in thread pool since handlers may be sync)
-            result = await asyncio.get_event_loop().run_in_executor(
-                None,
-                self.handlers.process,
-                JobType(job_type),
-                payload,
-            )
+            # Run handler directly (not in executor) to preserve DSPy context
+            result = self.handlers.process(JobType(job_type), payload)
 
             # Mark completed
             self.queue.complete_job(
@@ -172,15 +167,13 @@ class WorkerPool:
 
 def configure_dspy():
     """Configure DSPy once at worker startup (before workers start)."""
-    dspy.settings.configure(
-        lm=dspy.LM(
-            'anthropic/claude-sonnet-4-5-20250929',
-            max_tokens=64000,  # Sonnet 4.5 max output tokens
-            timeout=600  # 10 minute timeout for API calls
-        ),
-        adapter=dspy.JSONAdapter()
+    lm = dspy.LM(
+        'anthropic/claude-sonnet-4-5-20250929',
+        max_tokens=64000,
+        timeout=600,
     )
-    logger.info("DSPy configured globally with Claude Sonnet 4.5 (max_tokens=64000)")
+    dspy.configure(lm=lm)
+    logger.info("DSPy configured with Claude Sonnet 4.5")
 
 
 def main():

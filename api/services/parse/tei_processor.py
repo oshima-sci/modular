@@ -14,12 +14,46 @@ ET.register_namespace("xlink", "http://www.w3.org/1999/xlink")
 ET.register_namespace("xsi", "http://www.w3.org/2001/XMLSchema-instance")
 
 
+def _add_ids_to_div(div, div_id: str) -> None:
+    """Add IDs to heads, paragraphs, and sentences within a div."""
+    # Only add ID if not already present
+    if f"{{{XML_NS}}}id" not in div.attrib:
+        div.set(f"{{{XML_NS}}}id", div_id)
+
+    head_counter = 0
+    p_counter = 0
+
+    for child in div:
+        tag = child.tag.replace(f"{{{TEI_NS}}}", "")
+
+        if tag == "head":
+            head_counter += 1
+            head_id = f"{div_id}-h{head_counter}"
+            if f"{{{XML_NS}}}id" not in child.attrib:
+                child.set(f"{{{XML_NS}}}id", head_id)
+
+        elif tag == "p":
+            p_counter += 1
+            p_id = f"{div_id}-p{p_counter}"
+            if f"{{{XML_NS}}}id" not in child.attrib:
+                child.set(f"{{{XML_NS}}}id", p_id)
+
+            # Process sentences within paragraph
+            s_counter = 0
+            for s in child.findall(f"{{{TEI_NS}}}s"):
+                s_counter += 1
+                s_id = f"{p_id}-s{s_counter}"
+                if f"{{{XML_NS}}}id" not in s.attrib:
+                    s.set(f"{{{XML_NS}}}id", s_id)
+
+
 def add_element_ids(tei_xml: str) -> str:
     """
-    Add hierarchical IDs to elements in the TEI body.
+    Add hierarchical IDs to elements in the TEI abstract and body.
 
     ID schema:
-    - div: d1, d2, d3...
+    - abstract divs: abs-d1, abs-d2... (or abs if no divs)
+    - body divs: d1, d2, d3...
     - head inside div: d1-h1, d1-h2...
     - p inside div: d1-p1, d1-p2...
     - s inside p: d1-p1-s1, d1-p1-s2...
@@ -29,51 +63,45 @@ def add_element_ids(tei_xml: str) -> str:
     # Parse XML
     root = ET.fromstring(tei_xml)
 
+    # Process abstract
+    abstract = root.find(f".//{{{TEI_NS}}}abstract")
+    if abstract is not None:
+        # Check if abstract has divs
+        abstract_divs = abstract.findall(f"{{{TEI_NS}}}div")
+        if abstract_divs:
+            # Process each div in abstract
+            for i, div in enumerate(abstract_divs, 1):
+                _add_ids_to_div(div, f"abs-d{i}")
+        else:
+            # Abstract has no divs, treat the abstract itself as a container
+            # Add IDs to paragraphs and sentences directly in abstract
+            p_counter = 0
+            for child in abstract:
+                tag = child.tag.replace(f"{{{TEI_NS}}}", "")
+                if tag == "p":
+                    p_counter += 1
+                    p_id = f"abs-p{p_counter}"
+                    if f"{{{XML_NS}}}id" not in child.attrib:
+                        child.set(f"{{{XML_NS}}}id", p_id)
+
+                    # Process sentences within paragraph
+                    s_counter = 0
+                    for s in child.findall(f"{{{TEI_NS}}}s"):
+                        s_counter += 1
+                        s_id = f"{p_id}-s{s_counter}"
+                        if f"{{{XML_NS}}}id" not in s.attrib:
+                            s.set(f"{{{XML_NS}}}id", s_id)
+
     # Find body element
     body = root.find(f".//{{{TEI_NS}}}body")
-    if body is None:
-        # No body found, return unchanged
-        return tei_xml
-
-    # Process divs in body
-    div_counter = 0
-    for div in body.findall(f"{{{TEI_NS}}}div"):
-        div_counter += 1
-        div_id = f"d{div_counter}"
-
-        # Only add ID if not already present
-        if f"{{{XML_NS}}}id" not in div.attrib:
-            div.set(f"{{{XML_NS}}}id", div_id)
-
-        # Process heads and paragraphs within this div
-        head_counter = 0
-        p_counter = 0
-
-        for child in div:
-            tag = child.tag.replace(f"{{{TEI_NS}}}", "")
-
-            if tag == "head":
-                head_counter += 1
-                head_id = f"{div_id}-h{head_counter}"
-                if f"{{{XML_NS}}}id" not in child.attrib:
-                    child.set(f"{{{XML_NS}}}id", head_id)
-
-            elif tag == "p":
-                p_counter += 1
-                p_id = f"{div_id}-p{p_counter}"
-                if f"{{{XML_NS}}}id" not in child.attrib:
-                    child.set(f"{{{XML_NS}}}id", p_id)
-
-                # Process sentences within paragraph
-                s_counter = 0
-                for s in child.findall(f"{{{TEI_NS}}}s"):
-                    s_counter += 1
-                    s_id = f"{p_id}-s{s_counter}"
-                    if f"{{{XML_NS}}}id" not in s.attrib:
-                        s.set(f"{{{XML_NS}}}id", s_id)
+    if body is not None:
+        # Process divs in body
+        div_counter = 0
+        for div in body.findall(f"{{{TEI_NS}}}div"):
+            div_counter += 1
+            _add_ids_to_div(div, f"d{div_counter}")
 
     # Convert back to string
-    # Preserve XML declaration and formatting
     output = ET.tostring(root, encoding="unicode")
 
     # Add XML declaration back
