@@ -2,6 +2,7 @@ import logging
 from typing import Any, Callable
 
 from models import JobType
+from services.parse import handle_parse_paper
 
 logger = logging.getLogger(__name__)
 
@@ -19,6 +20,7 @@ class JobHandlers:
 
     def _register_default_handlers(self):
         """Register built-in handlers."""
+        self.register(JobType.PARSE_PAPER, handle_parse_paper)
         self.register(JobType.EXTRACT_CLAIMS, self._handle_extract_claims)
 
     def register(self, job_type: JobType, handler: HandlerFunc):

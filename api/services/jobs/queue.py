@@ -2,7 +2,7 @@ from typing import Any
 from uuid import UUID
 
 from db import get_supabase_client
-from models import Job, JobCreate, JobStatus
+from models import Job, JobCreate, JobStatus, JobType
 
 
 class JobQueue:
@@ -20,6 +20,16 @@ class JobQueue:
         }).execute()
 
         return Job(**result.data[0])
+
+    def create_job_by_type(
+        self,
+        job_type: JobType,
+        payload: dict[str, Any],
+        max_attempts: int = 3
+    ) -> Job:
+        """Convenience method to create a job directly by type."""
+        job_data = JobCreate(job_type=job_type, payload=payload, max_attempts=max_attempts)
+        return self.create_job(job_data)
 
     def get_job(self, job_id: UUID) -> Job | None:
         """Get a job by ID."""

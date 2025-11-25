@@ -2,7 +2,8 @@ import hashlib
 from uuid import UUID, uuid4
 
 from db import get_supabase_client
-from models import Paper, PaperUploadResult
+from models import Paper, PaperUploadResult, JobType
+from services.jobs import JobQueue
 
 
 BUCKET_NAME = "papers"
@@ -47,9 +48,9 @@ class PaperStorage:
                 error="Duplicate file already exists"
             )
 
-        # Generate unique storage path
+        # Generate unique storage path: {paper_id}/original.pdf
         paper_id = uuid4()
-        storage_path = f"{paper_id}/{filename}"
+        storage_path = f"{paper_id}/original.pdf"
 
         try:
             # Upload to bucket
@@ -72,6 +73,13 @@ class PaperStorage:
             }).execute()
 
             paper = Paper(**result.data[0])
+
+            # Create parse_paper job
+            job_queue = JobQueue()
+            job_queue.create_job_by_type(
+                job_type=JobType.PARSE_PAPER,
+                payload={"paper_id": str(paper_id)}
+            )
 
             return PaperUploadResult(
                 paper=paper,
