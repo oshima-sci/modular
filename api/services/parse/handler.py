@@ -4,6 +4,8 @@ from typing import Any
 
 from db import get_supabase_client
 from services.parse.grobid import GrobidParser
+from services.parse.tei_processor import add_element_ids
+from services.parse.screenshots import extract_figure_screenshots, save_screenshots_to_bucket
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +52,11 @@ def handle_parse_paper(payload: dict[str, Any]) -> dict[str, Any]:
     tei_xml = parser.parse_pdf(pdf_content, paper["filename"])
     logger.info(f"Received TEI XML ({len(tei_xml)} chars)")
 
-    # 4. Save TEI to bucket
+    # 4. Add hierarchical IDs to body elements
+    logger.info("Adding element IDs to TEI")
+    tei_xml = add_element_ids(tei_xml)
+
+    # 5. Save TEI to bucket
     parsed_path = f"{paper_id}/parsed.tei"
     logger.info(f"Saving TEI to {parsed_path}")
 
@@ -60,12 +66,21 @@ def handle_parse_paper(payload: dict[str, Any]) -> dict[str, Any]:
         file_options={"content-type": "application/xml"}
     )
 
-    # 5. Update paper record with parsed_path
+    # 6. Extract figure/table screenshots
+    logger.info("Extracting figure screenshots")
+    screenshots = extract_figure_screenshots(pdf_content, tei_xml)
+    figure_paths = []
+    if screenshots:
+        figure_paths = save_screenshots_to_bucket(db, paper_id, screenshots, BUCKET_NAME)
+        logger.info(f"Saved {len(figure_paths)} figure screenshots")
+
+    # 7. Update paper record with parsed_path
     db.table("papers").update({"parsed_path": parsed_path}).eq("id", paper_id).execute()
     logger.info(f"Updated paper {paper_id} with parsed_path={parsed_path}")
 
     return {
         "paper_id": paper_id,
         "parsed_path": parsed_path,
-        "tei_size": len(tei_xml)
+        "tei_size": len(tei_xml),
+        "figures_extracted": len(figure_paths)
     }
