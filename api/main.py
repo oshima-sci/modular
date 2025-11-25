@@ -1,0 +1,27 @@
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
+from routes import jobs_router, papers_router
+
+app = FastAPI()
+
+# Include routers
+app.include_router(jobs_router)
+app.include_router(papers_router)
+
+# Configure CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173"],  # Vite's default port
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+@app.get("/")
+async def root():
+    return {"message": "Hello from FastAPI!"}
+
+@app.get("/api/health")
+async def health():
+    return {"status": "healthy"}

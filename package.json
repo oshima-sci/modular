@@ -1,0 +1,13 @@
+{
+  "name": "modular",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "concurrently \"npm run dev:app\" \"npm run dev:api\"",
+    "dev:app": "cd app && npm run dev",
+    "dev:api": "cd api && source venv/bin/activate && uvicorn main:app --reload --port 8000"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1"
+  }
+}
