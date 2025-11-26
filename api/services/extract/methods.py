@@ -128,22 +128,25 @@ There may not be any in this paper.
 """
 
 
-def _get_methods_or_experiment_section(root: ET.Element) -> ET.Element | None:
+def _get_methods_sections(root: ET.Element) -> list[ET.Element]:
     """
-    Find div with head containing 'method' or 'experiment' (case-insensitive).
-    Returns the div element, or None if not found.
+    Find all divs with head containing method-related keywords (case-insensitive).
+    Returns list of matching div elements.
     """
+    METHOD_KEYWORDS = ["method", "material", "experiment", "stud", "design", "procedure", "protocol"]
+
     body = root.find(f".//{{{TEI_NS}}}body")
     if body is None:
-        return None
+        return []
 
+    matches = []
     for div in body.findall(f"{{{TEI_NS}}}div"):
         head = div.find(f"{{{TEI_NS}}}head")
         if head is not None and head.text:
             head_text = head.text.lower()
-            if "method" in head_text or "experiment" in head_text:
-                return div
-    return None
+            if any(kw in head_text for kw in METHOD_KEYWORDS):
+                matches.append(div)
+    return matches
 
 
 def build_methods_input(
@@ -231,14 +234,14 @@ def extract_methods_from_paper(paper_id: str) -> MethodsExtractionResult:
         abstract_xml = get_first_body_div(root) or ""
         logger.info("No abstract found, using first body div")
 
-    # 4. Check for methods section
-    methods_section = _get_methods_or_experiment_section(root)
+    # 4. Check for methods sections
+    methods_sections = _get_methods_sections(root)
     extractor = MethodsExtractor()
 
-    if methods_section is not None:
-        # Single call with methods section
-        logger.info("Found methods/experiment section")
-        body_xml = element_to_string(methods_section)
+    if methods_sections:
+        # Single call with combined methods sections
+        logger.info(f"Found {len(methods_sections)} methods section(s)")
+        body_xml = "\n".join(element_to_string(div) for div in methods_sections)
         content = build_methods_input(
             title=title,
             abstract_xml=abstract_xml,

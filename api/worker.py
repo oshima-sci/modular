@@ -71,6 +71,7 @@ class Worker:
         job_id = job["id"]
         job_type = job["job_type"]
         payload = job.get("payload") or {}
+        payload["job_id"] = job_id  # Inject job_id into payload for handlers
         attempt = job["attempts"]
         max_attempts = job["max_attempts"]
 

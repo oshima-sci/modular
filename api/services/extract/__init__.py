@@ -6,7 +6,7 @@ from .claims import (
     extract_claims_from_paper,
     handle_extract_claims,
 )
-from .handler import handle_paper_extract
+from .handler import handle_extract_elements
 
 __all__ = [
     "Claim",
@@ -15,5 +15,5 @@ __all__ = [
     "SourceReference",
     "extract_claims_from_paper",
     "handle_extract_claims",
-    "handle_paper_extract",
+    "handle_extract_elements",
 ]

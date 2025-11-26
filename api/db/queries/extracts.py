@@ -95,14 +95,19 @@ class ExtractQueries:
         latest_job_id = latest.data[0]["job_id"]
 
         # Now get all extracts from that job
-        result = (
+        query = (
             self.db.table("extracts")
             .select("*")
             .eq("paper_id", str(paper_id))
             .eq("type", extract_type)
-            .eq("job_id", latest_job_id)
-            .order("created_at", desc=True)
-            .execute()
         )
+
+        # Handle null job_id case
+        if latest_job_id is None:
+            query = query.is_("job_id", "null")
+        else:
+            query = query.eq("job_id", latest_job_id)
+
+        result = query.order("created_at", desc=True).execute()
 
         return result.data

@@ -17,7 +17,7 @@ class JobType(str, Enum):
     """Define your job types here."""
     PARSE_PAPER = "parse_paper"
     EXTRACT_CLAIMS = "extract_claims"
-    PAPER_EXTRACT = "paper_extract"
+    EXTRACT_ELEMENTS = "extract_elements"
     # Add more job types as needed
 
 

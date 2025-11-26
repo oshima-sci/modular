@@ -95,15 +95,16 @@ def handle_parse_paper(payload: dict[str, Any]) -> dict[str, Any]:
     db.table("papers").update(update_data).eq("id", paper_id).execute()
     logger.info(f"Updated paper {paper_id} with parsed_path and metadata")
 
-    # TODO: Fix worker DSPy config, then uncomment this
-    # # 9. Create paper_extract job to run extractions
-    # logger.info("Creating paper_extract job")
-    # queue = JobQueue()
-    # extract_job = queue.create_job_by_type(
-    #     JobType.PAPER_EXTRACT,
-    #     payload={"paper_id": paper_id},
-    # )
-    # logger.info(f"Created paper_extract job: {extract_job.id}")
+    # 9. Create extract_elements job to run extractions
+    from services.jobs import JobQueue
+    from models import JobType
+    logger.info("Creating extract_elements job")
+    queue = JobQueue()
+    extract_job = queue.create_job_by_type(
+        JobType.EXTRACT_ELEMENTS,
+        payload={"paper_id": paper_id},
+    )
+    logger.info(f"Created extract_elements job: {extract_job.id}")
 
     return {
         "paper_id": paper_id,
