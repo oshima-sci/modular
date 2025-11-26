@@ -3,7 +3,7 @@ import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from routes import jobs_router, papers_router
+from routes import jobs_router, libraries_router, papers_router
 
 logger = logging.getLogger(__name__)
 
@@ -11,6 +11,7 @@ app = FastAPI()
 
 # Include routers
 app.include_router(jobs_router)
+app.include_router(libraries_router)
 app.include_router(papers_router)
 
 # Configure CORS

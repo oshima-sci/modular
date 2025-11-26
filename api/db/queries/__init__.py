@@ -1,5 +1,6 @@
+from .extracts import ExtractQueries
+from .libraries import LibraryQueries
 from .papers import PaperQueries
 from .storage import StorageQueries
-from .extracts import ExtractQueries
 
-__all__ = ["PaperQueries", "StorageQueries", "ExtractQueries"]
+__all__ = ["ExtractQueries", "LibraryQueries", "PaperQueries", "StorageQueries"]
