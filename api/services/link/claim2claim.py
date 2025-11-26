@@ -5,9 +5,10 @@ from typing import Any
 from uuid import UUID
 
 import dspy
+import numpy as np
 from pydantic import BaseModel, Field
 
-from db import ExtractQueries
+from db import ExtractQueries, VectorQueries
 
 logger = logging.getLogger(__name__)
 
@@ -102,37 +103,151 @@ class ClaimLinker(dspy.Module):
         return result.links
 
 
-# --- Grouping Strategy ---
+# --- Similarity & Grouping ---
 
 
-def create_claim_groups(
-    claims: list[dict],
-    max_group_size: int = 20,
-) -> list[ClaimGroup]:
+def _cosine_similarity_matrix(embeddings: np.ndarray) -> np.ndarray:
     """
-    Create groups of claims for link evaluation.
-
-    Strategy: Start simple with fixed-size groups.
-    TODO: Add smarter grouping (by topic, embedding similarity, etc.)
+    Compute pairwise cosine similarity matrix.
 
     Args:
-        claims: All claim extracts from the library
-        max_group_size: Maximum claims per group (to keep LLM context manageable)
+        embeddings: (n, d) array of embedding vectors
 
     Returns:
-        List of ClaimGroup objects
+        (n, n) similarity matrix
     """
-    if len(claims) <= max_group_size:
-        return [ClaimGroup(claims=claims)]
+    norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
+    normalized = embeddings / norms
+    return normalized @ normalized.T
+
+
+def _build_similarity_groups(
+    claims: list[dict],
+    similarity_matrix: np.ndarray,
+    threshold: float = 0.75,
+) -> list[ClaimGroup]:
+    """
+    Build groups using greedy edge covering on the similarity graph.
+
+    For each claim, we identify similar claims (above threshold) and batch them
+    together. Claims may appear in multiple batches if they bridge different
+    neighborhoods. Isolated claims (no similar neighbors) are skipped.
+
+    Args:
+        claims: List of claim dicts (must have 'id' key)
+        similarity_matrix: (n, n) pairwise similarity scores
+        threshold: Minimum similarity to consider claims related
+
+    Returns:
+        List of ClaimGroup objects covering all similar pairs
+    """
+    n = len(claims)
+
+    # Build adjacency list (edges = pairs above threshold)
+    # Use upper triangle to avoid double-counting edges
+    adjacency: dict[int, set[int]] = {i: set() for i in range(n)}
+    for i in range(n):
+        for j in range(i + 1, n):
+            if similarity_matrix[i, j] >= threshold:
+                adjacency[i].add(j)
+                adjacency[j].add(i)
+
+    # Track which edges have been covered
+    uncovered_edges: set[tuple[int, int]] = set()
+    for i in range(n):
+        for j in adjacency[i]:
+            if i < j:
+                uncovered_edges.add((i, j))
+
+    if not uncovered_edges:
+        logger.info("No similar claim pairs found above threshold")
+        return []
 
     groups = []
-    for i in range(0, len(claims), max_group_size):
-        chunk = claims[i : i + max_group_size]
-        groups.append(ClaimGroup(claims=chunk))
 
-    # TODO: Consider overlapping windows or smarter clustering
-    logger.info(f"Created {len(groups)} groups from {len(claims)} claims")
+    # Greedy: pick node with most uncovered edges, batch it with neighbors
+    while uncovered_edges:
+        # Count uncovered edges per node
+        edge_counts: dict[int, int] = {}
+        for i, j in uncovered_edges:
+            edge_counts[i] = edge_counts.get(i, 0) + 1
+            edge_counts[j] = edge_counts.get(j, 0) + 1
+
+        # Pick node with most uncovered edges
+        pivot = max(edge_counts, key=lambda x: edge_counts[x])
+
+        # Get all neighbors that have uncovered edges to pivot
+        neighbors_with_uncovered = set()
+        for i, j in list(uncovered_edges):
+            if i == pivot:
+                neighbors_with_uncovered.add(j)
+            elif j == pivot:
+                neighbors_with_uncovered.add(i)
+
+        # Build group: pivot + all neighbors with uncovered edges
+        group_indices = {pivot} | neighbors_with_uncovered
+        group_claims = [claims[i] for i in group_indices]
+        groups.append(ClaimGroup(claims=group_claims))
+
+        # Mark edges within this group as covered
+        edges_to_remove = set()
+        group_list = list(group_indices)
+        for idx_a, i in enumerate(group_list):
+            for j in group_list[idx_a + 1:]:
+                edge = (min(i, j), max(i, j))
+                if edge in uncovered_edges:
+                    edges_to_remove.add(edge)
+
+        uncovered_edges -= edges_to_remove
+
+    logger.info(f"Created {len(groups)} similarity-based groups from {n} claims")
     return groups
+
+
+def _fetch_claims_with_embeddings(library_id: str) -> list[dict]:
+    """
+    Fetch all claims for a library and merge in their embeddings.
+
+    Args:
+        library_id: UUID of the library
+
+    Returns:
+        List of claim dicts, each with an 'embedding' key added
+    """
+    extracts = ExtractQueries()
+    vectors = VectorQueries()
+
+    # Fetch claims
+    claims = extracts.get_claims_by_library(library_id)
+    if not claims:
+        return []
+
+    # Fetch embeddings
+    claim_ids = [c["id"] for c in claims]
+    vector_records = vectors.get_by_extract_ids(claim_ids)
+
+    # Build lookup (parse string embeddings if needed)
+    import json
+
+    embedding_by_id = {}
+    for v in vector_records:
+        emb = v["embedding"]
+        # Handle string-encoded embeddings from DB
+        if isinstance(emb, str):
+            emb = json.loads(emb)
+        embedding_by_id[v["extract_id"]] = emb
+
+    # Merge embeddings into claims
+    claims_with_embeddings = []
+    for claim in claims:
+        embedding = embedding_by_id.get(claim["id"])
+        if embedding is not None:
+            claim["embedding"] = embedding
+            claims_with_embeddings.append(claim)
+        else:
+            logger.warning(f"Claim {claim['id']} has no embedding, skipping")
+
+    return claims_with_embeddings
 
 
 # --- Helper Functions ---
@@ -152,24 +267,31 @@ def _format_claims_for_llm(claims: list[dict]) -> str:
     return json.dumps(formatted, indent=2)
 
 
-# def _deduplicate_links(links: list[ClaimLink]) -> list[ClaimLink]:
-#     """Remove duplicate links (A->B and B->A count as one for symmetric types)."""
-#     seen = set()
-#     unique = []
+def _deduplicate_links(links: list[ClaimLink]) -> list[ClaimLink]:
+    """
+    Remove duplicate links (A->B and B->A count as one for symmetric types).
 
-#     for link in links:
-#         # For 'related' type, normalize order to avoid A-B and B-A duplicates
-#         if link.link_type == "related":
-#             key = tuple(sorted([link.source_claim_id, link.target_claim_id]))
-#         else:
-#             # Directional types keep order
-#             key = (link.source_claim_id, link.target_claim_id, link.link_type)
+    For symmetric link types (duplicate, variant, contradiction), order doesn't matter.
+    For directional types (premise), order is preserved.
+    """
+    seen = set()
+    unique = []
 
-#         if key not in seen:
-#             seen.add(key)
-#             unique.append(link)
+    symmetric_types = {ClaimLinkType.duplicate, ClaimLinkType.variant, ClaimLinkType.contradiction}
 
-#     return unique
+    for link in links:
+        if link.link_type in symmetric_types:
+            # Normalize order for symmetric types
+            key = (tuple(sorted([link.claim_id_1, link.claim_id_2])), link.link_type)
+        else:
+            # Preserve order for directional types (premise)
+            key = (link.claim_id_1, link.claim_id_2, link.link_type)
+
+        if key not in seen:
+            seen.add(key)
+            unique.append(link)
+
+    return unique
 
 
 # --- Main Orchestration ---
@@ -223,18 +345,22 @@ async def _link_claims_async(
     return all_links
 
 
-def link_claims_in_library(library_id: str | UUID) -> LinkingResult:
+def link_claims_in_library(
+    library_id: str | UUID,
+    similarity_threshold: float = 0.75,
+) -> LinkingResult:
     """
     Find and create links between claims in a library.
 
     Steps:
-    1. Fetch all claim extracts for papers in the library
-    2. Group claims into manageable chunks
+    1. Fetch all claim extracts with embeddings for papers in the library
+    2. Compute pairwise similarity and group claims by similarity
     3. Run DSPy linker on each group (concurrently)
-    4. Return results
+    4. Deduplicate and return results
 
     Args:
         library_id: UUID of the library to process
+        similarity_threshold: Minimum cosine similarity to consider claims related (default 0.75)
 
     Returns:
         LinkingResult with all discovered links
@@ -242,10 +368,9 @@ def link_claims_in_library(library_id: str | UUID) -> LinkingResult:
     library_id_str = str(library_id)
     logger.info(f"Starting claim-to-claim linking for library_id={library_id_str}")
 
-    # 1. Fetch all claims for the library
-    extracts = ExtractQueries()
-    claims = extracts.get_claims_by_library(library_id_str)
-    logger.info(f"Fetched {len(claims)} claims from library")
+    # 1. Fetch all claims with embeddings
+    claims = _fetch_claims_with_embeddings(library_id_str)
+    logger.info(f"Fetched {len(claims)} claims with embeddings from library")
 
     if len(claims) < 2:
         logger.info("Not enough claims to link")
@@ -256,18 +381,32 @@ def link_claims_in_library(library_id: str | UUID) -> LinkingResult:
             links=[],
         )
 
-    # 2. Group claims
-    groups = create_claim_groups(claims)
+    # 2. Compute similarity matrix and build groups
+    embeddings = np.array([c["embedding"] for c in claims])
+    similarity_matrix = _cosine_similarity_matrix(embeddings)
+    groups = _build_similarity_groups(claims, similarity_matrix, threshold=similarity_threshold)
+
+    if not groups:
+        logger.info("No similar claim pairs found, nothing to link")
+        return LinkingResult(
+            library_id=library_id_str,
+            total_claims=len(claims),
+            groups_processed=0,
+            links=[],
+        )
 
     # 3. Run linker on all groups concurrently
     all_links = asyncio.run(_link_claims_async(groups))
-    logger.info(f"Total links found: {len(all_links)}")
+
+    # 4. Deduplicate links (claims can appear in multiple groups)
+    unique_links = _deduplicate_links(all_links)
+    logger.info(f"Total unique links found: {len(unique_links)}")
 
     return LinkingResult(
         library_id=library_id_str,
         total_claims=len(claims),
         groups_processed=len(groups),
-        links=all_links,
+        links=unique_links,
     )
 
 
