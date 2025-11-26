@@ -51,6 +51,25 @@ class ExtractQueries:
         result = self.db.table("extracts").insert(normalized).execute()
         return result.data
 
+    def get_by_job_id(self, job_id: str | UUID) -> list[dict]:
+        """
+        Get extracts created by a specific job (used to check if job already ran).
+
+        Args:
+            job_id: UUID of the job
+
+        Returns:
+            List of extract records for that job (only IDs for efficiency)
+        """
+        result = (
+            self.db.table("extracts")
+            .select("id")
+            .eq("job_id", str(job_id))
+            .limit(1)
+            .execute()
+        )
+        return result.data
+
     def get_by_paper(
         self,
         paper_id: str | UUID,
@@ -58,6 +77,10 @@ class ExtractQueries:
     ) -> list[dict]:
         """
         Get all extracts for a paper, optionally filtered by type.
+
+        Args:
+            paper_id: UUID of the paper
+            extract_type: Optional filter by type ('claim', 'method', 'observation')
         """
         query = self.db.table("extracts").select("*").eq("paper_id", str(paper_id))
 
@@ -77,6 +100,10 @@ class ExtractQueries:
 
         Finds the latest job_id by created_at, then returns all extracts
         matching that job_id.
+
+        Args:
+            paper_id: UUID of the paper
+            extract_type: Type of extract ('claim', 'method', 'observation')
         """
         # First, get the most recent extract to find latest job_id
         latest = (
@@ -109,5 +136,50 @@ class ExtractQueries:
             query = query.eq("job_id", latest_job_id)
 
         result = query.order("created_at", desc=True).execute()
+
+        return result.data
+
+    def get_claims_by_library(
+        self,
+        library_id: str | UUID,
+    ) -> list[dict]:
+        """
+        Get all claim extracts for papers in a library.
+
+        Uses a join through library_papers to efficiently fetch all claims
+        associated with papers in the given library.
+
+        Args:
+            library_id: UUID of the library
+
+        Returns:
+            List of extract records with type='claim'
+        """
+        # Supabase doesn't support JOINs directly, so we do it in two steps:
+        # 1. Get paper_ids from library_papers
+        # 2. Fetch claims for those papers
+        #
+        # For large libraries, consider using a Postgres function or view.
+
+        library_papers = (
+            self.db.table("library_papers")
+            .select("paper_id")
+            .eq("library_id", str(library_id))
+            .execute()
+        )
+
+        paper_ids = [row["paper_id"] for row in library_papers.data]
+
+        if not paper_ids:
+            return []
+
+        # Fetch claims for all papers in library
+        result = (
+            self.db.table("extracts")
+            .select("*")
+            .in_("paper_id", paper_ids)
+            .eq("type", "claim")
+            .execute()
+        )
 
         return result.data
