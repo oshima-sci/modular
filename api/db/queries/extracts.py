@@ -144,10 +144,9 @@ class ExtractQueries:
         library_id: str | UUID,
     ) -> list[dict]:
         """
-        Get all claim extracts for papers in a library.
+        Get all claim extracts for papers in a library (latest job only per paper).
 
-        Uses a join through library_papers to efficiently fetch all claims
-        associated with papers in the given library.
+        For each paper, only returns claims from the most recent extraction job.
 
         Args:
             library_id: UUID of the library
@@ -155,12 +154,60 @@ class ExtractQueries:
         Returns:
             List of extract records with type='claim'
         """
-        # Supabase doesn't support JOINs directly, so we do it in two steps:
-        # 1. Get paper_ids from library_papers
-        # 2. Fetch claims for those papers
-        #
-        # For large libraries, consider using a Postgres function or view.
+        return self._get_extracts_by_library(library_id, "claim")
 
+    def get_observations_by_library(
+        self,
+        library_id: str | UUID,
+    ) -> list[dict]:
+        """
+        Get all observation extracts for papers in a library (latest job only per paper).
+
+        For each paper, only returns observations from the most recent extraction job.
+
+        Args:
+            library_id: UUID of the library
+
+        Returns:
+            List of extract records with type='observation'
+        """
+        return self._get_extracts_by_library(library_id, "observation")
+
+    def get_methods_by_library(
+        self,
+        library_id: str | UUID,
+    ) -> list[dict]:
+        """
+        Get all method extracts for papers in a library (latest job only per paper).
+
+        For each paper, only returns methods from the most recent extraction job.
+
+        Args:
+            library_id: UUID of the library
+
+        Returns:
+            List of extract records with type='method'
+        """
+        return self._get_extracts_by_library(library_id, "method")
+
+    def _get_extracts_by_library(
+        self,
+        library_id: str | UUID,
+        extract_type: str,
+    ) -> list[dict]:
+        """
+        Get extracts of a given type for all papers in a library (latest job only per paper).
+
+        For each paper, finds the latest job_id and only returns extracts from that job.
+
+        Args:
+            library_id: UUID of the library
+            extract_type: Type of extract ('claim', 'method', 'observation')
+
+        Returns:
+            List of extract records
+        """
+        # Get paper_ids from library_papers
         library_papers = (
             self.db.table("library_papers")
             .select("paper_id")
@@ -173,13 +220,10 @@ class ExtractQueries:
         if not paper_ids:
             return []
 
-        # Fetch claims for all papers in library
-        result = (
-            self.db.table("extracts")
-            .select("*")
-            .in_("paper_id", paper_ids)
-            .eq("type", "claim")
-            .execute()
-        )
+        # For each paper, get only the latest extracts
+        all_extracts = []
+        for paper_id in paper_ids:
+            extracts = self.get_latest_by_paper(paper_id, extract_type)
+            all_extracts.extend(extracts)
 
-        return result.data
+        return all_extracts

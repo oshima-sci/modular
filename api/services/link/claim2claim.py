@@ -297,7 +297,7 @@ def _deduplicate_links(links: list[ClaimLink]) -> list[ClaimLink]:
 # --- Main Orchestration ---
 
 # Max concurrent LLM requests
-MAX_CONCURRENT_REQUESTS = 10
+MAX_CONCURRENT_REQUESTS = 100
 
 
 async def _process_group(
