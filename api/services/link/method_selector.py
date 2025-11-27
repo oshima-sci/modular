@@ -94,7 +94,7 @@ async def _select_methods_for_claim(
 ) -> list[str]:
     """Select relevant methods for a single claim with semaphore-controlled concurrency."""
     async with semaphore:
-        logger.info(f"Selecting methods for claim {claim_idx + 1}")
+        logger.info(f"Selecting methods for claim")
         claim_json = _format_claim_for_llm(claim)
         methods_json = _format_methods_for_llm(methods)
 
@@ -103,7 +103,7 @@ async def _select_methods_for_claim(
             method_ids = await loop.run_in_executor(
                 None, selector, claim_json, methods_json
             )
-            logger.info(f"Selected {len(method_ids)} methods for claim {claim_idx + 1}")
+            logger.info(f"Selected {len(method_ids)} methods for claim")
             return method_ids
         except Exception as e:
             logger.error(f"Error selecting methods for claim {claim_idx + 1}: {e}")

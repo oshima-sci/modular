@@ -1,4 +1,4 @@
 from .supabase_client import get_supabase_client
-from .queries import PaperQueries, StorageQueries, ExtractQueries, VectorQueries
+from .queries import PaperQueries, StorageQueries, ExtractQueries, VectorQueries, LibraryQueries
 
-__all__ = ["get_supabase_client", "PaperQueries", "StorageQueries", "ExtractQueries", "VectorQueries"]
+__all__ = ["get_supabase_client", "PaperQueries", "StorageQueries", "ExtractQueries", "VectorQueries", "LibraryQueries"]

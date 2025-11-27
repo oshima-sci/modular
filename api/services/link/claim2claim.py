@@ -142,25 +142,21 @@ def _build_similarity_groups(
     For each input claim, finds similar library claims and groups them together.
     Uses greedy edge covering to batch efficiently. Claims may appear in multiple
     groups to ensure all similar pairs get evaluated.
-
-    Args:
-        input_claims: List of input claim dicts (rows of similarity matrix)
-        library_claims: List of all library claim dicts (columns of similarity matrix)
-        similarity_matrix: (n_input, n_library) similarity scores
-        threshold: Minimum similarity to consider claims related
-
-    Returns:
-        List of ClaimGroup objects covering all similar pairs
     """
     n_input = len(input_claims)
     n_library = len(library_claims)
+
+    # Build claim_id -> input_index lookup for fast membership checks
+    input_id_to_idx = {c["id"]: i for i, c in enumerate(input_claims)}
+    
+    # Build claim_id -> library_index lookup
+    library_id_to_idx = {c["id"]: j for j, c in enumerate(library_claims)}
 
     # Build adjacency: for each input claim, which library claims are similar?
     adjacency: dict[int, set[int]] = {i: set() for i in range(n_input)}
 
     for i in range(n_input):
         for j in range(n_library):
-            # Skip self-comparison (input claim appears in library)
             if input_claims[i]["id"] == library_claims[j]["id"]:
                 continue
             if similarity_matrix[i, j] >= threshold:
@@ -178,7 +174,6 @@ def _build_similarity_groups(
 
     groups = []
 
-    # Greedy: pick input claim with most uncovered edges, batch with its neighbors
     while uncovered_edges:
         # Count uncovered edges per input claim
         edge_counts: dict[int, int] = {}
@@ -188,21 +183,38 @@ def _build_similarity_groups(
         # Pick input claim with most uncovered edges
         pivot_input = max(edge_counts, key=lambda x: edge_counts[x])
 
-        # Get all library claims that have uncovered edges to this input
-        library_neighbors = set()
-        for i, j in list(uncovered_edges):
-            if i == pivot_input:
-                library_neighbors.add(j)
+        # Get all library claims connected to pivot
+        library_neighbors = {j for (i, j) in uncovered_edges if i == pivot_input}
 
-        # Build group: the input claim + all similar library claims
+        # Build group: the pivot + all similar library claims
         group_claims = [input_claims[pivot_input]]
         for lib_idx in library_neighbors:
             group_claims.append(library_claims[lib_idx])
 
         groups.append(ClaimGroup(claims=group_claims))
 
-        # Mark these edges as covered
-        edges_to_remove = {(pivot_input, j) for j in library_neighbors}
+        # Get all claim IDs in this group
+        group_claim_ids = {c["id"] for c in group_claims}
+        
+        # Get all input indices that are in this group
+        group_input_indices = {
+            input_id_to_idx[cid] 
+            for cid in group_claim_ids 
+            if cid in input_id_to_idx
+        }
+        
+        # Get all library indices that are in this group
+        group_library_indices = {
+            library_id_to_idx[cid] 
+            for cid in group_claim_ids 
+            if cid in library_id_to_idx
+        }
+
+        # Remove ALL edges where both endpoints are in the group
+        edges_to_remove = {
+            (i, j) for (i, j) in uncovered_edges
+            if i in group_input_indices and j in group_library_indices
+        }
         uncovered_edges -= edges_to_remove
 
     logger.info(f"Created {len(groups)} similarity-based groups from {n_input} input claims")

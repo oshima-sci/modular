@@ -460,23 +460,65 @@ async def _process_claim_async(
     semaphore: asyncio.Semaphore,
     linker: EvidenceLinker,
     claim: dict,
-    candidate_observations: list[dict],
+    observations: list[dict],
+    methods: list[dict],
     methods_lookup: dict[str, dict],
+    observations_by_method: dict[str, list[dict]],
+    observations_by_paper: dict[str, list[dict]],
     claim_idx: int,
 ) -> list[EvidenceLink]:
-    """Process a single claim with semaphore-controlled concurrency."""
+    """
+    Process a single claim with semaphore-controlled concurrency.
+
+    Performs method selection and evidence linking for one claim.
+    All sync operations are run in executor to avoid blocking.
+    """
+    from services.link.method_selector import select_methods_for_claims
+
     async with semaphore:
+        loop = asyncio.get_event_loop()
+
+        # 1. Method selection for this claim (sync, run in executor)
+        candidate_obs_ids: set[str] = set()
+
+        if methods:
+            try:
+                method_selections = await loop.run_in_executor(
+                    None, select_methods_for_claims, [claim], methods
+                )
+                selected_method_ids = method_selections[0] if method_selections else []
+
+                # Add observations from selected methods
+                for method_id in selected_method_ids:
+                    for obs in observations_by_method.get(method_id, []):
+                        candidate_obs_ids.add(obs["id"])
+            except Exception as e:
+                logger.error(f"Error selecting methods for claim {claim_idx + 1}: {e}")
+
+        # Always include same-paper observations
+        claim_paper_id = claim.get("paper_id")
+        if claim_paper_id:
+            for obs in observations_by_paper.get(claim_paper_id, []):
+                candidate_obs_ids.add(obs["id"])
+
+        # 2. Build candidate observations list
+        if candidate_obs_ids:
+            candidate_observations = [obs for obs in observations if obs["id"] in candidate_obs_ids]
+        else:
+            candidate_observations = []
+
         if not candidate_observations:
             return []
 
         logger.info(f"Processing claim {claim_idx + 1} ({len(candidate_observations)} observations)")
+
+        # 3. Evidence linking (sync DSPy call, run in executor)
         claim_json = _format_claim_for_llm(claim)
         observations_json = _format_observations_for_llm(
-            candidate_observations, methods_lookup, claim_paper_id=claim.get("paper_id")
+            candidate_observations, methods_lookup, claim_paper_id=claim_paper_id
         )
 
         try:
-            loop = asyncio.get_event_loop()
             links = await loop.run_in_executor(
                 None, linker, claim_json, observations_json
             )
@@ -497,50 +539,29 @@ async def _link_claims_async(
     """
     Run evidence linking on multiple claims concurrently.
 
-    Performs method selection for all claims first (batched), then runs
-    evidence linking concurrently with semaphore limit.
+    Each claim task handles its own method selection and linking sequentially,
+    avoiding nested event loop issues.
     """
-    from services.link.method_selector import select_methods_for_claims
-
-    # Build observation lookups
+    # Build observation lookups (shared across all tasks)
     observations_by_method, observations_by_paper = _build_observation_lookups(observations)
-
-    # Batch method selection for all claims
-    if methods:
-        logger.info(f"Selecting relevant methods for {len(claims)} claims")
-        method_selections = select_methods_for_claims(claims, methods)
-    else:
-        method_selections = [[] for _ in claims]
-
-    # Build candidate observations for each claim
-    candidate_obs_per_claim = []
-    for claim, selected_method_ids in zip(claims, method_selections):
-        candidate_obs_ids = set()
-
-        # Add observations from selected methods
-        for method_id in selected_method_ids:
-            for obs in observations_by_method.get(method_id, []):
-                candidate_obs_ids.add(obs["id"])
-
-        # Always include same-paper observations
-        claim_paper_id = claim.get("paper_id")
-        if claim_paper_id:
-            for obs in observations_by_paper.get(claim_paper_id, []):
-                candidate_obs_ids.add(obs["id"])
-
-        if candidate_obs_ids:
-            candidates = [obs for obs in observations if obs["id"] in candidate_obs_ids]
-        else:
-            candidates = []
-        candidate_obs_per_claim.append(candidates)
 
     # Run evidence linking concurrently
     semaphore = asyncio.Semaphore(max_concurrent)
     linker = EvidenceLinker()
 
     tasks = [
-        _process_claim_async(semaphore, linker, claim, candidates, methods_lookup, i)
-        for i, (claim, candidates) in enumerate(zip(claims, candidate_obs_per_claim))
+        _process_claim_async(
+            semaphore,
+            linker,
+            claim,
+            observations,
+            methods,
+            methods_lookup,
+            observations_by_method,
+            observations_by_paper,
+            i,
+        )
+        for i, claim in enumerate(claims)
     ]
 
     results = await asyncio.gather(*tasks)
