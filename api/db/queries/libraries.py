@@ -2,6 +2,7 @@
 from uuid import UUID
 
 from db import get_supabase_client
+from db.queries.extracts import ExtractQueries
 
 
 class LibraryQueries:
@@ -129,3 +130,68 @@ class LibraryQueries:
             for item in result.data
             if item.get("libraries")
         ]
+
+    def get_links_for_extracts(self, extract_ids: list[str | UUID]) -> list[dict]:
+        """Get all links where from_id is in the given extract IDs."""
+        if not extract_ids:
+            return []
+        result = (
+            self.db.table("extract_links")
+            .select("*")
+            .in_("from_id", [str(eid) for eid in extract_ids])
+            .execute()
+        )
+        return result.data
+
+    def get_full_library(self, library_id: str | UUID) -> dict | None:
+        """Get a library with all papers, extracts (latest per paper), and links."""
+        library = self.get_by_id(library_id)
+        if not library:
+            return None
+
+        # Get papers with added_at
+        papers_data = self.get_papers(library_id)
+        papers = []
+        paper_ids = []
+        for item in papers_data:
+            if item.get("papers"):
+                paper = item["papers"]
+                paper_ids.append(paper["id"])
+                # Extract abstract from metadata jsonb
+                metadata = paper.get("metadata") or {}
+                papers.append({
+                    "id": paper["id"],
+                    "title": paper.get("title"),
+                    "filename": paper["filename"],
+                    "storage_path": paper["storage_path"],
+                    "abstract": metadata.get("abstract"),
+                    "added_at": item["added_at"],
+                })
+
+        # Get latest extracts by type using ExtractQueries
+        extract_queries = ExtractQueries()
+        claims = extract_queries.get_claims_by_library(library_id)
+        observations = extract_queries.get_observations_by_library(library_id)
+        methods = extract_queries.get_methods_by_library(library_id)
+
+        all_extracts = claims + observations + methods
+        extract_ids = [e["id"] for e in all_extracts]
+
+        # Get links for these extracts
+        links = self.get_links_for_extracts(extract_ids)
+
+        return {
+            "library": library,
+            "papers": papers,
+            "extracts": {
+                "claims": claims,
+                "observations": observations,
+                "methods": methods,
+            },
+            "links": links,
+            "stats": {
+                "total_papers": len(papers),
+                "total_extracts": len(all_extracts),
+                "total_links": len(links),
+            },
+        }

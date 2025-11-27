@@ -5,9 +5,14 @@ from fastapi import APIRouter, Depends, HTTPException
 from db.queries.libraries import LibraryQueries
 from dependencies.auth import get_current_user, get_optional_user, UserContext
 from models.library import (
+    ExtractsByType,
     Library,
     LibraryCreateRequest,
     LibraryCreateResponse,
+    LibraryData,
+    LibraryFullResponse,
+    LibraryMetadata,
+    LibraryStats,
     LibraryWithPapers,
 )
 from services.link.queue import maybe_queue_link_library_for_library
@@ -80,24 +85,40 @@ async def list_libraries(
     return [Library(**lib) for lib in libraries]
 
 
-@router.get("/{library_id}", response_model=LibraryWithPapers)
+@router.get("/{library_id}", response_model=LibraryFullResponse)
 async def get_library(
     library_id: UUID,
     user: UserContext | None = Depends(get_optional_user),
     queries: LibraryQueries = Depends(get_queries),
 ):
-    """Get a library with all its papers."""
-    library = queries.get_library_with_papers(library_id)
+    """Get a library with all its papers, extracts, and links."""
+    result = queries.get_full_library(library_id)
 
-    if not library:
+    if not result:
         raise HTTPException(status_code=404, detail="Library not found")
+
+    library = result["library"]
 
     # Allow access if: library has no owner, or user owns it
     user_id = user.user_id if user else None
     if library["owner_id"] and library["owner_id"] != user_id:
         raise HTTPException(status_code=403, detail="Not authorized to view this library")
 
-    return LibraryWithPapers(**library)
+    return LibraryFullResponse(
+        metadata=LibraryMetadata(
+            id=library["id"],
+            owner_id=library.get("owner_id"),
+            title=library["title"],
+            created_at=library["created_at"],
+            updated_at=library["updated_at"],
+            stats=LibraryStats(**result["stats"]),
+        ),
+        data=LibraryData(
+            papers=result["papers"],
+            extracts=ExtractsByType(**result["extracts"]),
+            links=result["links"],
+        ),
+    )
 
 
 @router.delete("/{library_id}")
