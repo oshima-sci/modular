@@ -74,7 +74,6 @@ export const KnowledgeGraph: React.FC = () => {
   const [graphData, setGraphData] = useState<GraphData | null>(null);
   const [selectedNode, setSelectedNode] = useState<Node | null>(null);
   const [hoveredNode, setHoveredNode] = useState<Node | null>(null);
-  const [panelTab, setPanelTab] = useState<'claims' | 'observations'>('claims');
   const [showClaims, setShowClaims] = useState<boolean>(true);
   const [showObservations, setShowObservations] = useState<boolean>(false);
 
@@ -269,15 +268,6 @@ export const KnowledgeGraph: React.FC = () => {
     return { nodes: filteredNodes, links: filteredLinks };
   }, [graphData, showClaims, showObservations]);
 
-  // Derive quick lists for panel browsing when nothing selected
-  const allClaims = useMemo(() => {
-    if (!filteredGraphData) return [] as Node[];
-    return filteredGraphData.nodes.filter((n) => n.type === 'claim');
-  }, [filteredGraphData]);
-  const allObservations = useMemo(() => {
-    if (!filteredGraphData) return [] as Node[];
-    return filteredGraphData.nodes.filter((n) => n.type === 'observation');
-  }, [filteredGraphData]);
 
   // Compute neighbor IDs of the selected node (using the filtered data).
   const neighborNodeIds = useMemo(() => {
@@ -293,20 +283,23 @@ export const KnowledgeGraph: React.FC = () => {
     return neighbors;
   }, [filteredGraphData, selectedNode]);
 
-  // Group neighbors of the selected node by type (paper/claim/evidence)
-  const groupedNeighbors = useMemo(() => {
+  // The "active" node for the panel: selectedNode takes priority, then hoveredNode
+  const panelNode = selectedNode || hoveredNode;
+
+  // Group neighbors of the panel node by type (uses full graphData so hidden nodes still show in panel)
+  const panelGroupedNeighbors = useMemo(() => {
     const grouped = new Map<string, Node[]>();
-    if (!filteredGraphData || !selectedNode) return grouped;
+    if (!graphData || !panelNode) return grouped;
 
     const neighbors = new Map<string, Node>();
-    filteredGraphData.links.forEach((link) => {
+    graphData.links.forEach((link) => {
       const src = typeof link.source === "object" ? link.source.id : link.source;
       const tgt = typeof link.target === "object" ? link.target.id : link.target;
-      if (src === selectedNode.id) {
-        const n = filteredGraphData.nodes.find((x) => x.id === tgt);
+      if (src === panelNode.id) {
+        const n = graphData.nodes.find((x) => x.id === tgt);
         if (n) neighbors.set(n.id, n);
-      } else if (tgt === selectedNode.id) {
-        const n = filteredGraphData.nodes.find((x) => x.id === src);
+      } else if (tgt === panelNode.id) {
+        const n = graphData.nodes.find((x) => x.id === src);
         if (n) neighbors.set(n.id, n);
       }
     });
@@ -318,7 +311,7 @@ export const KnowledgeGraph: React.FC = () => {
     });
 
     return grouped;
-  }, [filteredGraphData, selectedNode]);
+  }, [graphData, panelNode]);
 
   // Helper to format type headings
   const formatTypeHeading = (type: string): string => {
@@ -368,10 +361,7 @@ export const KnowledgeGraph: React.FC = () => {
             if (link.type === "references") return "#ff7f0e";
             return "#aaa";
           }}
-          linkLabel={(link: any) =>
-            link.type === "relationship" ? link.relationship || "" : link.type
-          }
-          nodeLabel={(node: any) => getNodeLabelText(node as Node)}
+          nodeLabel={selectedNode ? (node: any) => getNodeLabelText(node as Node) : ""}
           onNodeClick={(node: any) => setSelectedNode(node as Node)}
           onNodeHover={(node: any) => {
             setHoveredNode(node as Node || null);
@@ -441,149 +431,105 @@ export const KnowledgeGraph: React.FC = () => {
           </motion.div>
         </div>
 
-        <motion.div 
+        <motion.div
           className="w-[28rem] h-[calc(100vh-12rem)] bg-white/95 backdrop-blur-xl rounded-2xl shadow-2xl border border-gray-200 overflow-hidden"
           layout
         >
           <div className="p-4 h-full flex flex-col">
-            {/* Header - fixed height */}
-            <motion.button 
-              className="h-10 flex justify-between items-center w-full px-4 rounded-xl bg-gray-50 hover:bg-gray-100"
-              onClick={() => {
-                if (selectedNode) {
-                  setSelectedNode(null);
-                }
-              }}
-              layout
+            {/* Header - shows selected or hovered node */}
+            <div
+              className={`h-10 flex justify-between items-center w-full px-4 rounded-xl ${
+                selectedNode ? 'bg-blue-50 border border-blue-200' : 'bg-gray-50'
+              }`}
             >
-              <h4 className="text-md font-semibold text-gray-900">
-                {selectedNode 
-                  ? `${getNodeLabelText(selectedNode)}`
-                  : "Select a Node"}
+              <h4 className="text-md font-semibold text-gray-900 truncate">
+                {panelNode
+                  ? getNodeLabelText(panelNode)
+                  : "Hover over a node"}
               </h4>
-              {selectedNode && (
-                <span className="text-[10px] font-medium text-gray-500 px-2 py-0.5 bg-gray-100 rounded">
-                  {selectedNode.type.toUpperCase()}
-                </span>
-              )}
-            </motion.button>
-
-            {/* Connections Section or Browsing Tabs */}
-            {selectedNode ? (
-              <AnimatePresence>
-                {groupedNeighbors.size > 0 && (
-                  <motion.div
-                    initial={{ opacity: 0, height: 0 }}
-                    animate={{ opacity: 1, height: "auto" }}
-                    exit={{ opacity: 0, height: 0 }}
-                    className="h-[200px] mt-4 px-2 overflow-y-auto"
+              <div className="flex items-center gap-2 flex-shrink-0 ml-2">
+                {panelNode && (
+                  <span className={`text-[10px] font-medium px-2 py-0.5 rounded ${
+                    panelNode.type === 'claim'
+                      ? 'text-orange-600 bg-orange-100'
+                      : 'text-green-600 bg-green-100'
+                  }`}>
+                    {panelNode.type.toUpperCase()}
+                  </span>
+                )}
+                {selectedNode && (
+                  <button
+                    onClick={() => setSelectedNode(null)}
+                    className="text-[10px] font-medium px-2 py-0.5 rounded text-blue-600 bg-blue-100 hover:bg-blue-200"
                   >
-                    <div className="flex flex-col gap-4">
+                    PINNED ✕
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Panel Node Content */}
+            <AnimatePresence mode="wait">
+              {panelNode ? (
+                <motion.div
+                  key={panelNode.id}
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  className="flex-1 mt-4 overflow-hidden flex flex-col"
+                >
+                  {/* Main node text */}
+                  <div className={`w-full text-left p-3 text-sm rounded-lg leading-relaxed ${
+                    panelNode.type === 'claim'
+                      ? 'bg-orange-50 text-orange-900 border border-orange-200'
+                      : 'bg-green-50 text-green-900 border border-green-200'
+                  }`}>
+                    {panelNode.displayText}
+                  </div>
+
+                  {/* Linked nodes */}
+                  {panelGroupedNeighbors.size > 0 && (
+                    <div className="mt-4 flex-1 overflow-y-auto">
                       {(() => {
-                        const order = selectedNode.type === 'claim'
+                        const order = panelNode.type === 'claim'
                           ? ['observation', 'claim']
                           : ['claim', 'observation'];
                         return order
-                          .filter((t) => groupedNeighbors.has(t))
+                          .filter((t) => panelGroupedNeighbors.has(t))
                           .map((t) => (
-                            <div key={t} className="grid grid-cols-[120px_1fr] gap-2">
-                              <span className="text-[10px] font-medium text-gray-500 tracking-wider px-2 py-1 bg-gray-100 rounded whitespace-nowrap">
-                                {formatTypeHeading(t)}
-                              </span>
-                              <div className="flex flex-wrap gap-2">
-                                {groupedNeighbors.get(t)!.map((n) => (
-                                  <motion.button
+                            <div key={t} className="mb-4">
+                              <h5 className="text-[10px] uppercase tracking-widest font-bold text-gray-500 mb-2 px-1">
+                                Linked {formatTypeHeading(t)}
+                              </h5>
+                              <div className="flex flex-col gap-2">
+                                {panelGroupedNeighbors.get(t)!.map((n) => (
+                                  <div
                                     key={n.id}
-                                    onClick={() => setSelectedNode(n)}
-                                    className={`px-2 py-1 text-xs rounded hover:opacity-80 ${
+                                    className={`w-full text-left p-3 text-sm rounded-lg leading-relaxed ${
                                       n.type === 'claim'
-                                        ? 'bg-orange-50 text-orange-600'
-                                        : 'bg-green-50 text-green-600'
+                                        ? 'bg-orange-50 text-orange-800'
+                                        : 'bg-green-50 text-green-800'
                                     }`}
-                                    whileHover={{ scale: 1.05 }}
-                                    whileTap={{ scale: 0.95 }}
                                   >
                                     {getNodeLabelText(n)}
-                                  </motion.button>
+                                  </div>
                                 ))}
                               </div>
                             </div>
                           ));
                       })()}
                     </div>
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            ) : (
-              <div className="mt-4 flex-1 overflow-hidden flex flex-col">
-                {/* Tabs */}
-                <div className="flex items-center gap-2 px-2">
-                  <button
-                    onClick={() => setPanelTab('claims')}
-                    className={`px-3 py-1.5 text-xs rounded-lg border ${panelTab === 'claims' ? 'bg-orange-500 text-white border-orange-500' : 'bg-white text-orange-700 border-gray-200 hover:bg-gray-50'}`}
-                  >
-                    Claims ({allClaims.length})
-                  </button>
-                  <button
-                    onClick={() => setPanelTab('observations')}
-                    className={`px-3 py-1.5 text-xs rounded-lg border ${panelTab === 'observations' ? 'bg-green-600 text-white border-green-600' : 'bg-white text-green-700 border-gray-200 hover:bg-gray-50'}`}
-                  >
-                    Observations ({allObservations.length})
-                  </button>
-                </div>
-                {/* List */}
-                <div className="flex-1 overflow-y-auto px-2 mt-2">
-                  {(panelTab === 'claims' ? allClaims : allObservations).map((n) => (
-                    <motion.button
-                      key={n.id}
-                      onClick={() => setSelectedNode(n)}
-                      className={`w-full text-left p-3 text-sm my-1.5 rounded-lg transition-colors ${panelTab === 'claims' ? 'bg-orange-50 hover:bg-orange-100 text-orange-900' : 'bg-green-50 hover:bg-green-100 text-green-900'}`}
-                      whileHover={{ scale: 1.01 }}
-                      whileTap={{ scale: 0.99 }}
-                    >
-                      {getNodeLabelText(n)}
-                    </motion.button>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Selected Node Content Section */}
-            <AnimatePresence>
-              {selectedNode && (
+                  )}
+                </motion.div>
+              ) : (
                 <motion.div
+                  key="empty"
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
                   exit={{ opacity: 0 }}
-                  className="flex-1 mt-4 overflow-hidden flex flex-col"
-                  layout
+                  className="flex-1 mt-4 flex items-center justify-center text-gray-400 text-sm"
                 >
-                  <h5 className="sticky top-0 text-[10px] uppercase tracking-widest font-bold text-gray-900 mb-2 px-2 bg-gray-50 py-1">
-                    Details
-                  </h5>
-                  <motion.div className="flex-1 overflow-y-auto px-2">
-                    <div className="w-full text-left p-3 text-sm my-1.5 rounded-lg bg-gray-100 text-gray-700 leading-relaxed">
-                      {selectedNode.displayText}
-                    </div>
-                    {selectedNode.rawContent?.reasoning && (
-                      <div className="w-full text-left p-3 text-xs my-1.5 rounded-lg bg-gray-50 text-gray-500 leading-relaxed">
-                        <span className="font-medium text-gray-600">Reasoning: </span>
-                        {selectedNode.rawContent.reasoning}
-                      </div>
-                    )}
-                    {selectedNode.rawContent?.observation_type && (
-                      <div className="w-full text-left p-3 text-xs my-1.5 rounded-lg bg-gray-50 text-gray-500 leading-relaxed">
-                        <span className="font-medium text-gray-600">Type: </span>
-                        {selectedNode.rawContent.observation_type}
-                      </div>
-                    )}
-                    {selectedNode.rawContent?.quantitative_details && (
-                      <div className="w-full text-left p-3 text-xs my-1.5 rounded-lg bg-gray-50 text-gray-500 leading-relaxed">
-                        <span className="font-medium text-gray-600">Quantitative: </span>
-                        {selectedNode.rawContent.quantitative_details}
-                      </div>
-                    )}
-                  </motion.div>
+                  Hover over a node to see its details and connections
                 </motion.div>
               )}
             </AnimatePresence>

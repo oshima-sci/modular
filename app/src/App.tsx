@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import KnowledgeGraphFlow from './components/KnowledgeGraphFlow'
+import KnowledgeGraph from './components/KnowledgeGraph'
 import './App.css'
 
 function App() {
@@ -7,7 +7,7 @@ function App() {
 
   return (
     <div className="w-screen h-screen">
-      <KnowledgeGraphFlow />
+      <KnowledgeGraph />
     </div>
   )
 }
