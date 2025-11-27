@@ -37,7 +37,7 @@ def main():
 
     # Configure DSPy with Claude
     lm = dspy.LM(
-        model="anthropic/claude-sonnet-4-20250514",
+        model="anthropic/claude-sonnet-4-5-20250929",
         api_key=os.getenv("ANTHROPIC_API_KEY"),
         max_tokens=64000,
     )
@@ -129,7 +129,7 @@ def main():
     print("\n" + "=" * 80)
     print("DSPY HISTORY (last 5 calls)")
     print("=" * 80)
-    dspy.inspect_history(n=5)
+    dspy.inspect_history(n=1)
 
 
 if __name__ == "__main__":

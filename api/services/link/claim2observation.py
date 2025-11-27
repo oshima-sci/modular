@@ -63,7 +63,7 @@ class EvidenceLinkingResult(BaseModel):
 
 class LinkClaimToObservations(dspy.Signature):
     """
-    Identify evidential relationships between a scientific claim and observations.
+    Identify evidential relationships between a scientific claim and provided observations.
 
     Given a claim and a set of observations (empirical findings, measurements, experimental
     results) from papers in a research library, identify which observations serve as
@@ -85,7 +85,10 @@ class LinkClaimToObservations(dspy.Signature):
     """
 
     claim_json: str = dspy.InputField(desc="JSON object with claim id and text")
-    observations_json: str = dspy.InputField(desc="JSON array of observations from different methods/studies")
+    observations_json: str = dspy.InputField(desc="""
+        JSON object with observations and context of the methods/studies that produced them.
+        Contains observations from the literature and potentially from same paper as the claim (if so they are marked as such).
+    """)
     links: list[EvidenceLink] = dspy.OutputField(desc="List of identified evidence links")
 
 
@@ -308,38 +311,66 @@ def _format_claim_for_llm(claim: dict) -> str:
 def _format_observations_for_llm(
     observations: list[dict],
     methods_lookup: dict[str, dict] | None = None,
+    claim_paper_id: str | None = None,
 ) -> str:
-    """Format observations as JSON for the DSPy module.
+    """Format observations as JSON for the DSPy module, grouped by method.
 
     Args:
         observations: List of observation dicts
         methods_lookup: Optional dict mapping method_id -> method dict for context
+        claim_paper_id: Optional paper_id of the claim to separate same-paper observations
     """
     import json
 
-    formatted = []
+    # Separate same-paper vs general literature observations
+    same_paper_obs = []
+    general_obs = []
     for obs in observations:
-        # Start with id and paper_id
-        obs_data = {
-            "id": obs["id"],
-            "paper_id": obs["paper_id"],
-        }
+        if claim_paper_id and obs.get("paper_id") == claim_paper_id:
+            same_paper_obs.append(obs)
+        else:
+            general_obs.append(obs)
 
-        # Add all content fields except source_elements
-        content = obs.get("content", {})
-        for key, value in content.items():
-            if key != "source_elements":
-                obs_data[key] = value
+    def group_by_method(obs_list: list[dict]) -> list[dict]:
+        """Group observations by method_reference."""
+        method_groups: dict[str | None, list[dict]] = {}
+        for obs in obs_list:
+            content = obs.get("content", {})
+            method_id = content.get("method_reference")
+            if method_id not in method_groups:
+                method_groups[method_id] = []
+            method_groups[method_id].append(obs)
 
-        # Add method context if available
-        method_id = content.get("method_reference")
-        if method_id and methods_lookup:
-            method = methods_lookup.get(method_id)
-            if method:
-                obs_data["method_summary"] = method["content"].get("method_summary", "")
+        grouped = []
+        for method_id, obs_in_method in method_groups.items():
+            method_summary = None
+            if method_id and methods_lookup:
+                method = methods_lookup.get(method_id)
+                if method:
+                    method_summary = method["content"].get("method_summary", "")
 
-        formatted.append(obs_data)
-    return json.dumps(formatted, indent=2)
+            formatted_obs = []
+            for obs in obs_in_method:
+                obs_data = {"id": obs["id"]}
+                content = obs.get("content", {})
+                for key, value in content.items():
+                    if key not in ("source_elements", "method_reference"):
+                        obs_data[key] = value
+                formatted_obs.append(obs_data)
+
+            grouped.append({
+                "method_summary": method_summary,
+                "observations": formatted_obs,
+            })
+        return grouped
+
+    result = {}
+    if same_paper_obs:
+        result["observations_from_same_paper"] = group_by_method(same_paper_obs)
+    if general_obs:
+        result["observations_from_general_literature"] = group_by_method(general_obs)
+
+    return json.dumps(result, indent=2)
 
 
 def _deduplicate_links(links: list[EvidenceLink]) -> list[EvidenceLink]:
@@ -407,7 +438,9 @@ def link_observations_to_claim(
     # 2. Run evidence linker
     linker = EvidenceLinker()
     claim_json = _format_claim_for_llm(claim)
-    observations_json = _format_observations_for_llm(candidate_observations, methods_lookup)
+    observations_json = _format_observations_for_llm(
+        candidate_observations, methods_lookup, claim_paper_id=claim.get("paper_id")
+    )
 
     try:
         links = linker(claim_json, observations_json)
@@ -438,7 +471,9 @@ async def _process_claim_async(
 
         logger.info(f"Processing claim {claim_idx + 1} ({len(candidate_observations)} observations)")
         claim_json = _format_claim_for_llm(claim)
-        observations_json = _format_observations_for_llm(candidate_observations, methods_lookup)
+        observations_json = _format_observations_for_llm(
+            candidate_observations, methods_lookup, claim_paper_id=claim.get("paper_id")
+        )
 
         try:
             loop = asyncio.get_event_loop()

@@ -91,7 +91,7 @@ def main():
 
     # Configure DSPy with Claude
     lm = dspy.LM(
-        model="anthropic/claude-sonnet-4-20250514",
+        model="anthropic/claude-sonnet-4-5-20250929",
         api_key=os.getenv("ANTHROPIC_API_KEY"),
         max_tokens=64000,
     )

@@ -28,7 +28,6 @@ class SourceReference(BaseModel):
     """Reference to a source element in the TEI."""
     source_element_id: str = Field(description="The xml:id of the source element (e.g., 'd1-p2-s1')")
 
-
 class Observation(BaseModel):
     """A single empirical observation extracted from a paper."""
     source_elements: list[SourceReference] = Field(description="References to TEI elements describing this observation")
