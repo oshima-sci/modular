@@ -1,4 +1,5 @@
 """Database queries for extracts table."""
+from datetime import datetime
 from typing import Any
 from uuid import UUID
 
@@ -227,3 +228,64 @@ class ExtractQueries:
             all_extracts.extend(extracts)
 
         return all_extracts
+
+    def get_unlinked_claims_for_library(
+        self,
+        library_id: str | UUID,
+        cutoff: datetime | None = None,
+    ) -> list[dict]:
+        """
+        Get claims that are "new" to this library - not yet processed by previous linking jobs.
+
+        A claim is "new" if either:
+        - extract.created_at > cutoff (claim didn't exist during last linking)
+        - library_papers.added_at > cutoff (paper wasn't in library during last linking)
+
+        If cutoff is None, returns all claims (new library case).
+
+        Args:
+            library_id: UUID of the library
+            cutoff: Timestamp cutoff - claims newer than this are returned.
+                    If None, all claims are returned.
+
+        Returns:
+            List of claim extract records that need to be linked
+        """
+        # Get paper_ids and their added_at timestamps from library_papers
+        library_papers = (
+            self.db.table("library_papers")
+            .select("paper_id, added_at")
+            .eq("library_id", str(library_id))
+            .execute()
+        )
+
+        if not library_papers.data:
+            return []
+
+        # If no cutoff, return all claims (new library)
+        if cutoff is None:
+            return self.get_claims_by_library(library_id)
+
+        cutoff_str = cutoff.isoformat()
+
+        # Build a map of paper_id -> added_at
+        paper_added_at = {
+            row["paper_id"]: row["added_at"]
+            for row in library_papers.data
+        }
+        paper_ids = list(paper_added_at.keys())
+
+        # Get latest claims for each paper, then filter by cutoff
+        unlinked_claims = []
+        for paper_id in paper_ids:
+            claims = self.get_latest_by_paper(paper_id, "claim")
+            added_at = paper_added_at[paper_id]
+
+            for claim in claims:
+                # Include if claim was created after cutoff
+                # OR if paper was added to library after cutoff
+                claim_created = claim.get("created_at", "")
+                if claim_created > cutoff_str or (added_at and added_at > cutoff_str):
+                    unlinked_claims.append(claim)
+
+        return unlinked_claims

@@ -18,7 +18,7 @@ class JobType(str, Enum):
     PARSE_PAPER = "parse_paper"
     EXTRACT_CLAIMS = "extract_claims"
     EXTRACT_ELEMENTS = "extract_elements"
-    # Add more job types as needed
+    LINK_LIBRARY = "link_library"
 
 
 class JobCreate(BaseModel):

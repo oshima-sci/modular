@@ -552,6 +552,77 @@ async def _link_claims_async(
     return all_links
 
 
+def link_observations_to_input_claims(
+    library_id: str | UUID,
+    input_claims: list[dict],
+) -> EvidenceLinkingResult:
+    """
+    Link input claims against ALL observations in a library.
+
+    Used by LINK_LIBRARY job for incremental linking - only processes
+    new/unlinked claims rather than the entire library.
+
+    Args:
+        library_id: UUID of the library
+        input_claims: List of claim dicts (must include embeddings)
+
+    Returns:
+        EvidenceLinkingResult with discovered evidence links
+    """
+    library_id_str = str(library_id)
+    logger.info(
+        f"Starting c2o linking for {len(input_claims)} input claims in library {library_id_str}"
+    )
+
+    if not input_claims:
+        logger.info("No input claims provided, skipping c2o linking")
+        return EvidenceLinkingResult(
+            library_id=library_id_str,
+            total_claims=0,
+            total_observations=0,
+            groups_processed=0,
+            links=[],
+        )
+
+    # Fetch ALL observations from the library
+    observations = _fetch_observations_with_embeddings(library_id_str)
+    logger.info(f"Fetched {len(observations)} observations with embeddings")
+
+    if not observations:
+        logger.info("No observations in library, skipping c2o linking")
+        return EvidenceLinkingResult(
+            library_id=library_id_str,
+            total_claims=len(input_claims),
+            total_observations=0,
+            groups_processed=0,
+            links=[],
+        )
+
+    # Fetch methods for preselection
+    methods = _fetch_methods(library_id_str)
+    logger.info(f"Fetched {len(methods)} methods for preselection")
+
+    # Build methods lookup for observation context
+    methods_lookup = {m["id"]: m for m in methods}
+
+    # Run linking on input claims concurrently
+    all_links = asyncio.run(
+        _link_claims_async(input_claims, observations, methods, methods_lookup)
+    )
+
+    # Deduplicate links
+    unique_links = _deduplicate_links(all_links)
+    logger.info(f"Total unique evidence links found: {len(unique_links)}")
+
+    return EvidenceLinkingResult(
+        library_id=library_id_str,
+        total_claims=len(input_claims),
+        total_observations=len(observations),
+        groups_processed=len(input_claims),
+        links=unique_links,
+    )
+
+
 def link_observations_to_claims(
     library_id: str | UUID,
 ) -> EvidenceLinkingResult:

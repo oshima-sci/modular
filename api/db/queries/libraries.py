@@ -115,3 +115,17 @@ class LibraryQueries:
             if item.get("papers")
         ]
         return library
+
+    def get_libraries_for_paper(self, paper_id: str | UUID) -> list[dict]:
+        """Get all libraries that contain a given paper."""
+        result = (
+            self.db.table("library_papers")
+            .select("library_id, added_at, libraries(*)")
+            .eq("paper_id", str(paper_id))
+            .execute()
+        )
+        return [
+            {**item["libraries"], "added_at": item["added_at"]}
+            for item in result.data
+            if item.get("libraries")
+        ]

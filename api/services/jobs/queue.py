@@ -1,3 +1,4 @@
+from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import UUID
 
@@ -81,3 +82,123 @@ class JobQueue:
         }).execute()
 
         return rpc_result.data is True
+
+    def has_pending_processing_jobs_for_library(
+        self,
+        library_id: str | UUID,
+    ) -> bool:
+        """
+        Check if any papers in the library have pending/running processing jobs.
+
+        Looks for PARSE_PAPER or EXTRACT_ELEMENTS jobs that are pending or running
+        for any paper connected to this library.
+
+        Args:
+            library_id: UUID of the library to check
+
+        Returns:
+            True if there are pending/running processing jobs, False otherwise
+        """
+        # Get all paper_ids in this library
+        library_papers = (
+            self.db.table("library_papers")
+            .select("paper_id")
+            .eq("library_id", str(library_id))
+            .execute()
+        )
+
+        if not library_papers.data:
+            return False
+
+        paper_ids = [lp["paper_id"] for lp in library_papers.data]
+
+        # Check for pending/running PARSE_PAPER or EXTRACT_ELEMENTS jobs
+        # Jobs store paper_id in payload->>'paper_id'
+        processing_types = [JobType.PARSE_PAPER.value, JobType.EXTRACT_ELEMENTS.value]
+        active_statuses = [JobStatus.PENDING.value, JobStatus.RUNNING.value]
+
+        for paper_id in paper_ids:
+            result = (
+                self.db.table("jobs")
+                .select("id")
+                .in_("job_type", processing_types)
+                .in_("status", active_statuses)
+                .eq("payload->>paper_id", paper_id)
+                .limit(1)
+                .execute()
+            )
+            if result.data:
+                return True
+
+        return False
+
+    def has_recent_pending_link_job(
+        self,
+        library_id: str | UUID,
+        minutes: int = 3,
+    ) -> bool:
+        """
+        Check if there's a recent pending LINK_LIBRARY job for this library.
+
+        Used to prevent duplicate link jobs when multiple papers finish processing
+        around the same time. Only checks pending (not running) - running jobs are
+        fine because concurrent jobs handle distinct time windows via cutoff.
+
+        Args:
+            library_id: UUID of the library to check
+            minutes: How far back to look for existing jobs (default 3 minutes)
+
+        Returns:
+            True if there's a recent pending link job, False otherwise
+        """
+        cutoff = datetime.now(timezone.utc) - timedelta(minutes=minutes)
+
+        result = (
+            self.db.table("jobs")
+            .select("id")
+            .eq("job_type", JobType.LINK_LIBRARY.value)
+            .eq("status", JobStatus.PENDING.value)
+            .eq("payload->>library_id", str(library_id))
+            .gte("created_at", cutoff.isoformat())
+            .limit(1)
+            .execute()
+        )
+
+        return len(result.data) > 0
+
+    def get_previous_link_job_claimed_at(
+        self,
+        library_id: str | UUID,
+    ) -> datetime | None:
+        """
+        Get the claimed_at timestamp of the most recent completed/running LINK_LIBRARY job.
+
+        Used to determine the cutoff for which extracts are "new" to this library.
+        New jobs should process extracts created or added after this timestamp.
+
+        Args:
+            library_id: UUID of the library
+
+        Returns:
+            claimed_at timestamp of the previous job, or None if no previous job exists
+        """
+        result = (
+            self.db.table("jobs")
+            .select("claimed_at")
+            .eq("job_type", JobType.LINK_LIBRARY.value)
+            .in_("status", [JobStatus.COMPLETED.value, JobStatus.RUNNING.value])
+            .eq("payload->>library_id", str(library_id))
+            .order("claimed_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+
+        if not result.data or not result.data[0].get("claimed_at"):
+            return None
+
+        # Parse the timestamp string to datetime
+        claimed_at_str = result.data[0]["claimed_at"]
+        if isinstance(claimed_at_str, str):
+            # Handle ISO format with timezone
+            return datetime.fromisoformat(claimed_at_str.replace("Z", "+00:00"))
+        return claimed_at_str

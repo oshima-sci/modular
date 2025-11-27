@@ -4,6 +4,7 @@ from typing import Any, Callable
 from models import JobType
 from services.parse import handle_parse_paper
 from services.extract import handle_extract_elements
+from services.link.handler import handle_link_library
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +25,7 @@ class JobHandlers:
         self.register(JobType.PARSE_PAPER, handle_parse_paper)
         self.register(JobType.EXTRACT_CLAIMS, self._handle_extract_claims)
         self.register(JobType.EXTRACT_ELEMENTS, handle_extract_elements)
+        self.register(JobType.LINK_LIBRARY, handle_link_library)
 
     def register(self, job_type: JobType, handler: HandlerFunc):
         """Register a handler for a job type."""

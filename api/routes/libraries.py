@@ -10,6 +10,7 @@ from models.library import (
     LibraryCreateResponse,
     LibraryWithPapers,
 )
+from services.link.queue import maybe_queue_link_library_for_library
 
 router = APIRouter(prefix="/api/library", tags=["libraries"])
 
@@ -53,6 +54,10 @@ async def create_or_update_library(
 
     # Add papers to library
     added = queries.add_papers(library["id"], request.paper_ids)
+
+    # Queue LINK_LIBRARY job if conditions are met
+    if added:
+        maybe_queue_link_library_for_library(library["id"])
 
     return LibraryCreateResponse(
         library=Library(**library),

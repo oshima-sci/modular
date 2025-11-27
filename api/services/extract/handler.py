@@ -6,6 +6,7 @@ from db import ExtractQueries, VectorQueries
 from services.extract.claims import extract_claims_from_paper
 from services.extract.methods import extract_methods_from_paper
 from services.extract.observations import extract_observations_from_paper
+from services.link.queue import maybe_queue_link_library
 from services.vector import embed_texts
 
 logger = logging.getLogger(__name__)
@@ -163,6 +164,11 @@ def handle_extract_elements(payload: dict[str, Any]) -> dict[str, Any]:
         results["observations_skipped"] = False
 
     logger.info(f"Extract elements complete: {results}")
+
+    # Queue LINK_LIBRARY jobs for any libraries this paper belongs to
+    link_jobs = maybe_queue_link_library(paper_id)
+    if link_jobs:
+        logger.info(f"Queued {len(link_jobs)} LINK_LIBRARY jobs for paper {paper_id}")
 
     return {
         "paper_id": paper_id,
