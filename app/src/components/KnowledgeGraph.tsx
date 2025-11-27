@@ -242,8 +242,7 @@ export const KnowledgeGraph: React.FC = () => {
 
   // Determine human-friendly label text per node type
   const getNodeLabelText = (node: Node): string => {
-    const text = node.displayText || node.id;
-    return text.length > 120 ? `${text.slice(0, 120)}…` : text;
+    return node.displayText || node.id;
   };
 
   // Filter nodes based on visibility toggles
@@ -340,51 +339,15 @@ export const KnowledgeGraph: React.FC = () => {
     (fgRef.current as any)?.refresh?.();
   }, [hoveredNode]);
 
-  // Canvas text wrapping to a max width with ellipsis after maxLines
-  const wrapTextToWidth = (
-    ctx: CanvasRenderingContext2D,
-    text: string,
-    maxWidth: number,
-    maxLines: number,
-    lineHeight: number
-  ): { lines: string[]; width: number; height: number } => {
-    const words = text.split(/\s+/);
-    const lines: string[] = [];
-    let current = "";
-    let widest = 0;
-
-    for (let i = 0; i < words.length; i++) {
-      const test = current ? current + " " + words[i] : words[i];
-      const w = ctx.measureText(test).width;
-      if (w <= maxWidth) {
-        current = test;
-        widest = Math.max(widest, w);
-      } else {
-        if (current) {
-          lines.push(current);
-        }
-        current = words[i];
-        widest = Math.max(widest, ctx.measureText(current).width);
-      }
-      if (lines.length === maxLines - 1) {
-        // last line: force remainder with ellipsis if needed
-        const remaining = words.slice(i + 1).join(" ");
-        const candidate = current + (remaining ? " " + remaining : "");
-        let truncated = candidate;
-        while (ctx.measureText(truncated + "…").width > maxWidth && truncated.length > 0) {
-          truncated = truncated.slice(0, -1);
-        }
-        lines.push(truncated + (truncated.length < candidate.length ? "…" : ""));
-        widest = Math.min(maxWidth, Math.max(widest, ctx.measureText(truncated + "…").width));
-        return { lines, width: widest, height: lines.length * lineHeight };
-      }
+  // Configure link distances: variant links at 10% of default (30)
+  useEffect(() => {
+    if (fgRef.current) {
+      const DEFAULT_DISTANCE = 30; // d3-force default
+      fgRef.current.d3Force('link')?.distance((link: any) => {
+        return link.linkType === 'variant' ? DEFAULT_DISTANCE * 0.05 : DEFAULT_DISTANCE;
+      });
     }
-    if (current) {
-      lines.push(current);
-    }
-    widest = Math.min(maxWidth, Math.max(widest, ...lines.map(l => ctx.measureText(l).width)));
-    return { lines, width: widest, height: lines.length * lineHeight };
-  };
+  }, [filteredGraphData]);
 
   return (
     <div className="relative w-full h-screen bg-gray-50">
@@ -394,6 +357,7 @@ export const KnowledgeGraph: React.FC = () => {
           graphData={filteredGraphData}
           nodeAutoColorBy="type"
           linkColor={(link: any) => {
+            if (link.linkType === "variant") return "transparent";
             const src = typeof link.source === "object" ? link.source.id : link.source;
             const tgt = typeof link.target === "object" ? link.target.id : link.target;
             if (selectedNode) {
@@ -407,86 +371,7 @@ export const KnowledgeGraph: React.FC = () => {
           linkLabel={(link: any) =>
             link.type === "relationship" ? link.relationship || "" : link.type
           }
-          nodeCanvasObjectMode={() => 'replace'}
-          nodeCanvasObject={(n: any, ctx: CanvasRenderingContext2D, globalScale: number) => {
-            const node = n as Node & { x?: number; y?: number };
-            const x = (n as any).x as number;
-            const y = (n as any).y as number;
-            if (typeof x !== 'number' || typeof y !== 'number') return;
-
-            const isSelected = !!selectedNode && node.id === selectedNode.id;
-            const isNeighborOfSelected = !!selectedNode && neighborNodeIds.has(node.id);
-            const isHovered = !!hoveredNode && node.id === hoveredNode.id;
-
-            // Base circle for all nodes; dim non-related when a selection exists
-            const baseColor = selectedNode
-              ? (isSelected || isNeighborOfSelected ? getNodeColor(node) : '#ddd')
-              : getNodeColor(node);
-            ctx.fillStyle = baseColor;
-            const r = selectedNode && isSelected ? 4.5 : 3;
-            ctx.beginPath();
-            ctx.arc(x, y, r, 0, 2 * Math.PI, false);
-            ctx.fill();
-
-            // Show label only for selected or hovered
-            if (!(isSelected || isHovered)) return;
-
-            const label = getNodeLabelText(node);
-            const color = getNodeColor(node);
-            const baseSize = isSelected ? 18 : 14;
-            const fontSize = Math.max(10, baseSize / globalScale);
-            const lineHeight = fontSize * 1.3;
-            const maxWidth = 220; // px cap for labels
-            ctx.font = `${fontSize}px Sans-Serif`;
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
-
-            const wrapped = wrapTextToWidth(ctx, label, maxWidth, 3, lineHeight);
-            const padding = 6;
-            const boxWidth = wrapped.width + padding * 2;
-            const boxHeight = wrapped.height + padding * 2;
-            const boxX = x - boxWidth / 2;
-            const boxY = y - boxHeight / 2;
-
-            // Single background style (light only) to avoid duplicates
-            ctx.fillStyle = 'rgba(255,255,255,0.92)';
-            ctx.fillRect(boxX, boxY, boxWidth, boxHeight);
-
-            ctx.fillStyle = color;
-            wrapped.lines.forEach((ln, i) => {
-              const ly = boxY + padding + lineHeight * (i + 0.5);
-              ctx.fillText(ln, x, ly);
-            });
-          }}
-          nodePointerAreaPaint={(n: any, color: string, ctx: CanvasRenderingContext2D, globalScale: number) => {
-            const node = n as Node & { x?: number; y?: number };
-            const x = (n as any).x as number;
-            const y = (n as any).y as number;
-            if (typeof x !== 'number' || typeof y !== 'number') return;
-
-            // Make hover/selection detection robust: cover node circle and potential label area
-            ctx.fillStyle = color;
-            ctx.beginPath();
-            ctx.arc(x, y, 8, 0, 2 * Math.PI, false);
-            ctx.fill();
-
-            const willShowLabel = (selectedNode && (node.id === selectedNode.id)) || (hoveredNode && node.id === hoveredNode.id);
-            if (!willShowLabel) return;
-
-            const label = getNodeLabelText(node);
-            const baseSize = selectedNode && node.id === selectedNode.id ? 18 : 14;
-            const fontSize = Math.max(10, baseSize / globalScale);
-            const lineHeight = fontSize * 1.3;
-            const maxWidth = 220;
-            ctx.font = `${fontSize}px Sans-Serif`;
-            const wrapped = wrapTextToWidth(ctx, label, maxWidth, 3, lineHeight);
-            const padding = 6;
-            const boxWidth = wrapped.width + padding * 2;
-            const boxHeight = wrapped.height + padding * 2;
-            const boxX = x - boxWidth / 2;
-            const boxY = y - boxHeight / 2;
-            ctx.fillRect(boxX, boxY, boxWidth, boxHeight);
-          }}
+          nodeLabel={(node: any) => getNodeLabelText(node as Node)}
           onNodeClick={(node: any) => setSelectedNode(node as Node)}
           onNodeHover={(node: any) => {
             setHoveredNode(node as Node || null);
