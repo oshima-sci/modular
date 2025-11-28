@@ -14,17 +14,14 @@ import {
   ResizablePanel,
   ResizableHandle,
 } from "@/components/ui/resizable";
+import type { LibraryData } from "@/hooks/useLibrary";
 
-// Raw library.json types
+// Internal types for display
 interface Paper {
   id: string;
-  title: string;
+  title: string | null;
   filename: string;
   abstract: string | null;
-}
-
-interface SourceElement {
-  source_element_id: string;
 }
 
 interface Method {
@@ -32,48 +29,8 @@ interface Method {
   paper_id: string;
   type: "method";
   content: {
-    method_summary: string;
+    method_summary?: string;
     novel_method?: boolean;
-  };
-}
-
-interface LibraryData {
-  data: {
-    papers: Paper[];
-    extracts: {
-      claims: Array<{
-        id: string;
-        paper_id: string;
-        type: "claim";
-        content: {
-          rephrased_claim: string;
-          reasoning: string;
-          source_elements?: SourceElement[];
-        };
-      }>;
-      observations: Array<{
-        id: string;
-        paper_id: string;
-        type: "observation";
-        content: {
-          observation_summary: string;
-          observation_type: string;
-          method_reference?: string;
-          source_elements?: SourceElement[];
-        };
-      }>;
-      methods?: Method[];
-    };
-    links: Array<{
-      id: string;
-      from_id: string;
-      to_id: string;
-      content: {
-        link_type: string;
-        link_category: string;
-        reasoning: string;
-      };
-    }>;
   };
 }
 
@@ -437,6 +394,7 @@ const EdgeDetails: React.FC<EdgeDetailsProps> = ({ link, graphData }) => {
 
 // ============ Main KnowledgeGraph Component ============
 interface KnowledgeGraphProps {
+  libraryData: LibraryData | undefined;
   selectedNode: Node | null;
   hoveredNode: Node | null;
   selectedLink: Link | null;
@@ -451,6 +409,7 @@ interface KnowledgeGraphProps {
 }
 
 export const KnowledgeGraph: React.FC<KnowledgeGraphProps> = ({
+  libraryData,
   selectedNode,
   hoveredNode,
   selectedLink,
@@ -495,187 +454,192 @@ export const KnowledgeGraph: React.FC<KnowledgeGraphProps> = ({
   const [methodsMap, setMethodsMap] = useState<Map<string, Method>>(new Map());
 
   useEffect(() => {
-    fetch("/library.json")
-      .then((res) => res.json())
-      .then((data: LibraryData) => {
-        // Build papers map
-        const papers = new Map<string, Paper>();
-        data.data.papers.forEach((p) => papers.set(p.id, p));
-        setPapersMap(papers);
+    if (!libraryData) return;
 
-        // Build methods map
-        const methods = new Map<string, Method>();
-        data.data.extracts.methods?.forEach((m) => methods.set(m.id, m));
-        setMethodsMap(methods);
+    // Build papers map
+    const papers = new Map<string, Paper>();
+    libraryData.papers.forEach((p) => papers.set(p.id, p));
+    setPapersMap(papers);
 
-        // Transform claims into nodes
-        const claimNodes: Node[] = data.data.extracts.claims.map((claim) => ({
-          id: claim.id,
-          type: "claim" as const,
-          displayText: claim.content.rephrased_claim,
-          rawContent: claim.content,
-          paperIds: [claim.paper_id],
-          sourceElementIds: claim.content.source_elements?.map((s) => s.source_element_id) || [],
-        }));
+    // Build methods map
+    const methods = new Map<string, Method>();
+    libraryData.extracts.methods?.forEach((m) => methods.set(m.id, {
+      id: m.id,
+      paper_id: m.paper_id,
+      type: "method",
+      content: {
+        method_summary: m.content.method_summary,
+        novel_method: m.content.novel_method,
+      },
+    }));
+    setMethodsMap(methods);
 
-        // Transform observations into nodes
-        const observationNodes: Node[] = data.data.extracts.observations.map((obs) => ({
-          id: obs.id,
-          type: "observation" as const,
-          displayText: obs.content.observation_summary,
-          rawContent: obs.content,
-          paperIds: [obs.paper_id],
-          sourceElementIds: obs.content.source_elements?.map((s) => s.source_element_id) || [],
-          observationType: obs.content.observation_type,
-          methodReference: obs.content.method_reference,
-        }));
+    // Transform claims into nodes
+    const claimNodes: Node[] = libraryData.extracts.claims.map((claim) => ({
+      id: claim.id,
+      type: "claim" as const,
+      displayText: claim.content.rephrased_claim || "",
+      rawContent: claim.content,
+      paperIds: [claim.paper_id],
+      sourceElementIds: claim.content.source_elements?.map((s) => s.source_element_id) || [],
+    }));
 
-        // Build initial node map
-        const nodeMap = new Map<string, Node>();
-        [...claimNodes, ...observationNodes].forEach((n) => nodeMap.set(n.id, n));
+    // Transform observations into nodes
+    const observationNodes: Node[] = libraryData.extracts.observations.map((obs) => ({
+      id: obs.id,
+      type: "observation" as const,
+      displayText: obs.content.observation_summary || "",
+      rawContent: obs.content,
+      paperIds: [obs.paper_id],
+      sourceElementIds: obs.content.source_elements?.map((s) => s.source_element_id) || [],
+      observationType: obs.content.observation_type,
+      methodReference: obs.content.method_reference,
+    }));
 
-        // Find duplicate links and build union-find structure for merging
-        const duplicateLinks = data.data.links.filter(
-          (link) => link.content.link_type === "duplicate"
-        );
+    // Build initial node map
+    const nodeMap = new Map<string, Node>();
+    [...claimNodes, ...observationNodes].forEach((n) => nodeMap.set(n.id, n));
 
-        // Union-Find to group duplicates
-        const parent = new Map<string, string>();
-        const find = (id: string): string => {
-          if (!parent.has(id)) parent.set(id, id);
-          if (parent.get(id) !== id) {
-            parent.set(id, find(parent.get(id)!));
-          }
-          return parent.get(id)!;
+    // Find duplicate links and build union-find structure for merging
+    const duplicateLinks = libraryData.links.filter(
+      (link) => link.content.link_type === "duplicate"
+    );
+
+    // Union-Find to group duplicates
+    const parent = new Map<string, string>();
+    const find = (id: string): string => {
+      if (!parent.has(id)) parent.set(id, id);
+      if (parent.get(id) !== id) {
+        parent.set(id, find(parent.get(id)!));
+      }
+      return parent.get(id)!;
+    };
+    const union = (a: string, b: string) => {
+      const rootA = find(a);
+      const rootB = find(b);
+      if (rootA !== rootB) {
+        parent.set(rootB, rootA);
+      }
+    };
+
+    // Union all duplicate pairs
+    duplicateLinks.forEach((link) => {
+      if (nodeMap.has(link.from_id) && nodeMap.has(link.to_id)) {
+        union(link.from_id, link.to_id);
+      }
+    });
+
+    // Group nodes by their root
+    const groups = new Map<string, string[]>();
+    nodeMap.forEach((_, id) => {
+      const root = find(id);
+      if (!groups.has(root)) groups.set(root, []);
+      groups.get(root)!.push(id);
+    });
+
+    // Create merged nodes and mapping from old IDs to new IDs
+    const mergedNodes: Node[] = [];
+    const idMapping = new Map<string, string>(); // old id -> new merged id
+
+    groups.forEach((memberIds, rootId) => {
+      if (memberIds.length === 1) {
+        // No merge needed, keep original node
+        const node = nodeMap.get(memberIds[0])!;
+        mergedNodes.push(node);
+        idMapping.set(memberIds[0], memberIds[0]);
+      } else {
+        // Create merged node - collect all paperIds and sourceElementIds from members
+        const representativeNode = nodeMap.get(rootId)!;
+        const allPaperIds = new Set<string>();
+        const allSourceElementIds = new Set<string>();
+        memberIds.forEach((id) => {
+          const n = nodeMap.get(id)!;
+          n.paperIds.forEach((pid) => allPaperIds.add(pid));
+          n.sourceElementIds.forEach((sid) => allSourceElementIds.add(sid));
+        });
+
+        const mergedNode: Node = {
+          id: `merged-${rootId}`,
+          type: representativeNode.type,
+          displayText: representativeNode.displayText,
+          rawContent: {
+            ...representativeNode.rawContent,
+            mergedFrom: memberIds.map((id) => ({
+              id,
+              displayText: nodeMap.get(id)!.displayText,
+              rawContent: nodeMap.get(id)!.rawContent,
+            })),
+          },
+          paperIds: Array.from(allPaperIds),
+          sourceElementIds: Array.from(allSourceElementIds),
+          observationType: representativeNode.observationType,
+          methodReference: representativeNode.methodReference,
+          mergedNodeIds: memberIds,
+          isMerged: true,
         };
-        const union = (a: string, b: string) => {
-          const rootA = find(a);
-          const rootB = find(b);
-          if (rootA !== rootB) {
-            parent.set(rootB, rootA);
-          }
-        };
+        mergedNodes.push(mergedNode);
+        memberIds.forEach((id) => idMapping.set(id, mergedNode.id));
+      }
+    });
 
-        // Union all duplicate pairs
-        duplicateLinks.forEach((link) => {
-          if (nodeMap.has(link.from_id) && nodeMap.has(link.to_id)) {
-            union(link.from_id, link.to_id);
-          }
-        });
+    const mergedNodeIds = new Set(mergedNodes.map((n) => n.id));
 
-        // Group nodes by their root
-        const groups = new Map<string, string[]>();
-        nodeMap.forEach((_, id) => {
-          const root = find(id);
-          if (!groups.has(root)) groups.set(root, []);
-          groups.get(root)!.push(id);
-        });
+    // Transform links, remapping IDs and removing duplicate-type links
+    const nonDuplicateLinks = libraryData.links.filter(
+      (link) => link.content.link_type !== "duplicate"
+    );
 
-        // Create merged nodes and mapping from old IDs to new IDs
-        const mergedNodes: Node[] = [];
-        const idMapping = new Map<string, string>(); // old id -> new merged id
+    const linksWithRemappedIds: Link[] = nonDuplicateLinks
+      .map((link) => ({
+        source: idMapping.get(link.from_id) || link.from_id,
+        target: idMapping.get(link.to_id) || link.to_id,
+        linkType: link.content.link_type,
+        linkCategory: link.content.link_category,
+        reasoning: link.content.reasoning,
+      }))
+      .filter((link) => {
+        const src = link.source as string;
+        const tgt = link.target as string;
+        // Remove self-loops and ensure both nodes exist
+        return src !== tgt && mergedNodeIds.has(src) && mergedNodeIds.has(tgt);
+      });
 
-        groups.forEach((memberIds, rootId) => {
-          if (memberIds.length === 1) {
-            // No merge needed, keep original node
-            const node = nodeMap.get(memberIds[0])!;
-            mergedNodes.push(node);
-            idMapping.set(memberIds[0], memberIds[0]);
-          } else {
-            // Create merged node - collect all paperIds and sourceElementIds from members
-            const representativeNode = nodeMap.get(rootId)!;
-            const allPaperIds = new Set<string>();
-            const allSourceElementIds = new Set<string>();
-            memberIds.forEach((id) => {
-              const n = nodeMap.get(id)!;
-              n.paperIds.forEach((pid) => allPaperIds.add(pid));
-              n.sourceElementIds.forEach((sid) => allSourceElementIds.add(sid));
-            });
+    // Deduplicate links (same source-target pair)
+    const linkKey = (l: Link) => {
+      const src = typeof l.source === "string" ? l.source : l.source.id;
+      const tgt = typeof l.target === "string" ? l.target : l.target.id;
+      return `${src}->${tgt}`;
+    };
+    const seenLinks = new Set<string>();
+    const dedupedLinks: Link[] = [];
+    linksWithRemappedIds.forEach((link) => {
+      const key = linkKey(link);
+      const src = typeof link.source === "string" ? link.source : link.source.id;
+      const tgt = typeof link.target === "string" ? link.target : link.target.id;
+      const reverseKey = `${tgt}->${src}`;
+      if (!seenLinks.has(key) && !seenLinks.has(reverseKey)) {
+        seenLinks.add(key);
+        dedupedLinks.push(link);
+      }
+    });
 
-            const mergedNode: Node = {
-              id: `merged-${rootId}`,
-              type: representativeNode.type,
-              displayText: representativeNode.displayText,
-              rawContent: {
-                ...representativeNode.rawContent,
-                mergedFrom: memberIds.map((id) => ({
-                  id,
-                  displayText: nodeMap.get(id)!.displayText,
-                  rawContent: nodeMap.get(id)!.rawContent,
-                })),
-              },
-              paperIds: Array.from(allPaperIds),
-              sourceElementIds: Array.from(allSourceElementIds),
-              observationType: representativeNode.observationType,
-              methodReference: representativeNode.methodReference,
-              mergedNodeIds: memberIds,
-              isMerged: true,
-            };
-            mergedNodes.push(mergedNode);
-            memberIds.forEach((id) => idMapping.set(id, mergedNode.id));
-          }
-        });
+    // Log stats
+    const mergedCount = mergedNodes.filter((n) => n.isMerged).length;
+    const totalOriginal = claimNodes.length + observationNodes.length;
+    console.log(`Merged ${totalOriginal} nodes into ${mergedNodes.length} (${mergedCount} merged groups)`);
+    console.log(`Links: ${dedupedLinks.length} (after removing duplicates and self-loops)`);
 
-        const mergedNodeIds = new Set(mergedNodes.map((n) => n.id));
+    // Log claim link types
+    const claimLinkTypes: Record<string, number> = {};
+    dedupedLinks
+      .filter((l) => l.linkCategory === "claim_to_claim")
+      .forEach((l) => {
+        claimLinkTypes[l.linkType] = (claimLinkTypes[l.linkType] || 0) + 1;
+      });
+    console.log("Claim-to-claim link types:", claimLinkTypes);
 
-        // Transform links, remapping IDs and removing duplicate-type links
-        const nonDuplicateLinks = data.data.links.filter(
-          (link) => link.content.link_type !== "duplicate"
-        );
-
-        const linksWithRemappedIds: Link[] = nonDuplicateLinks
-          .map((link) => ({
-            source: idMapping.get(link.from_id) || link.from_id,
-            target: idMapping.get(link.to_id) || link.to_id,
-            linkType: link.content.link_type,
-            linkCategory: link.content.link_category,
-            reasoning: link.content.reasoning,
-          }))
-          .filter((link) => {
-            const src = link.source as string;
-            const tgt = link.target as string;
-            // Remove self-loops and ensure both nodes exist
-            return src !== tgt && mergedNodeIds.has(src) && mergedNodeIds.has(tgt);
-          });
-
-        // Deduplicate links (same source-target pair)
-        const linkKey = (l: Link) => {
-          const src = typeof l.source === "string" ? l.source : l.source.id;
-          const tgt = typeof l.target === "string" ? l.target : l.target.id;
-          return `${src}->${tgt}`;
-        };
-        const seenLinks = new Set<string>();
-        const dedupedLinks: Link[] = [];
-        linksWithRemappedIds.forEach((link) => {
-          const key = linkKey(link);
-          const src = typeof link.source === "string" ? link.source : link.source.id;
-          const tgt = typeof link.target === "string" ? link.target : link.target.id;
-          const reverseKey = `${tgt}->${src}`;
-          if (!seenLinks.has(key) && !seenLinks.has(reverseKey)) {
-            seenLinks.add(key);
-            dedupedLinks.push(link);
-          }
-        });
-
-        // Log stats
-        const mergedCount = mergedNodes.filter((n) => n.isMerged).length;
-        const totalOriginal = claimNodes.length + observationNodes.length;
-        console.log(`Merged ${totalOriginal} nodes into ${mergedNodes.length} (${mergedCount} merged groups)`);
-        console.log(`Links: ${dedupedLinks.length} (after removing duplicates and self-loops)`);
-
-        // Log claim link types
-        const claimLinkTypes: Record<string, number> = {};
-        dedupedLinks
-          .filter((l) => l.linkCategory === "claim_to_claim")
-          .forEach((l) => {
-            claimLinkTypes[l.linkType] = (claimLinkTypes[l.linkType] || 0) + 1;
-          });
-        console.log("Claim-to-claim link types:", claimLinkTypes);
-
-        setGraphData({ nodes: mergedNodes, links: dedupedLinks });
-      })
-      .catch((error) => console.error("Error loading library data:", error));
-  }, []);
+    setGraphData({ nodes: mergedNodes, links: dedupedLinks });
+  }, [libraryData]);
 
 
   const getNodeColor = (node: Node) => {

@@ -1,5 +1,7 @@
 import * as React from "react";
 import { useState, useEffect } from "react";
+import { useParams } from "react-router-dom";
+import { useLibrary } from "@/hooks/useLibrary";
 import {
   ResizablePanelGroup,
   ResizablePanel,
@@ -60,6 +62,9 @@ export interface SelectionState {
 }
 
 export const KnowledgeGraphView: React.FC = () => {
+  const { libraryId } = useParams<{ libraryId: string }>();
+  const { data: library, isLoading, error } = useLibrary(libraryId);
+
   const [pdfPanelOpen, setPdfPanelOpen] = useState(false);
   const [teiBboxes, setTeiBboxes] = useState<BBox[]>([]);
   const [highlightedBboxId, setHighlightedBboxId] = useState<string | null>(null);
@@ -136,6 +141,7 @@ export const KnowledgeGraphView: React.FC = () => {
         {/* Main graph + details panel */}
         <ResizablePanel defaultSize={pdfPanelOpen ? 65 : 100} minSize={40}>
           <KnowledgeGraph
+            libraryData={library?.data}
             selectedNode={selectedNode}
             hoveredNode={hoveredNode}
             selectedLink={selectedLink}
