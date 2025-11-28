@@ -36,8 +36,9 @@ def configure_logging():
 def configure_dspy():
     """Configure DSPy for this process."""
     lm = dspy.LM(
-        'anthropic/claude-sonnet-4-5-20250929',
-        max_tokens=64000,
+        'openai/gpt-5-mini-2025-08-07',
+        max_tokens=None,
+        temperature=None,
         timeout=600,
     )
     dspy.configure(lm=lm)

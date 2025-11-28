@@ -6,7 +6,8 @@ from typing import Any
 
 from db import ExtractQueries
 from db.queries.extract_links import ExtractLinkQueries
-from services.link.claim2claim import add_embeddings_to_claims, link_claims
+from services.link.claim2claim import add_embeddings_to_claims
+from services.link.claim2claim_pairwise import link_claims_pairwise
 from services.link.claim2observation import link_observations_to_input_claims
 
 logger = logging.getLogger(__name__)
@@ -220,13 +221,16 @@ def handle_link_library(payload: dict[str, Any]) -> dict[str, Any]:
     valid_observation_ids = {o["id"] for o in all_observations}
     logger.info(f"Loaded {len(valid_claim_ids)} valid claim IDs, {len(valid_observation_ids)} valid observation IDs")
 
-    # 3. Run claim-to-claim linking and save immediately
-    logger.info("Running claim-to-claim linking...")
-    c2c_result = link_claims(
+    # 3. Run claim-to-claim linking (pairwise approach) and save immediately
+    logger.info("Running claim-to-claim linking (pairwise)...")
+    c2c_pairwise_result = link_claims_pairwise(
         input_claims=claims_with_embeddings,
         library_id=library_id,
     )
+    c2c_result = c2c_pairwise_result.result
+    c2c_usage = c2c_pairwise_result.stats
     logger.info(f"C2C linking found {len(c2c_result.links)} links")
+    logger.info(f"C2C usage: {c2c_usage.total_calls} calls, {c2c_usage.total_input_tokens} input tokens, {c2c_usage.total_output_tokens} output tokens, ${c2c_usage.total_cost:.4f}")
 
     # Save c2c links immediately after finding them
     c2c_saved = _save_c2c_links(c2c_result.links, job_id, valid_claim_ids)
@@ -234,11 +238,14 @@ def handle_link_library(payload: dict[str, Any]) -> dict[str, Any]:
 
     # 4. Run claim-to-observation linking
     logger.info("Running claim-to-observation linking...")
-    c2o_result = link_observations_to_input_claims(
+    c2o_pairwise_result = link_observations_to_input_claims(
         library_id=library_id,
         input_claims=claims_with_embeddings,
     )
+    c2o_result = c2o_pairwise_result.result
+    c2o_usage = c2o_pairwise_result.stats
     logger.info(f"C2O linking found {len(c2o_result.links)} links")
+    logger.info(f"C2O usage: {c2o_usage.total_calls} calls, {c2o_usage.total_input_tokens} input tokens, {c2o_usage.total_output_tokens} output tokens, ${c2o_usage.total_cost:.4f}")
 
     # 5. Save c2o links to database
     c2o_saved = _save_c2o_links(c2o_result.links, job_id, valid_claim_ids, valid_observation_ids)
@@ -251,5 +258,17 @@ def handle_link_library(payload: dict[str, Any]) -> dict[str, Any]:
         "c2c_links_created": c2c_saved,
         "c2o_links_found": len(c2o_result.links),
         "c2o_links_created": c2o_saved,
+        "c2c_usage": {
+            "total_calls": c2c_usage.total_calls,
+            "input_tokens": c2c_usage.total_input_tokens,
+            "output_tokens": c2c_usage.total_output_tokens,
+            "cost": c2c_usage.total_cost,
+        },
+        "c2o_usage": {
+            "total_calls": c2o_usage.total_calls,
+            "input_tokens": c2o_usage.total_input_tokens,
+            "output_tokens": c2o_usage.total_output_tokens,
+            "cost": c2o_usage.total_cost,
+        },
         "status": "complete",
     }

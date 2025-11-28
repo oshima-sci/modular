@@ -191,6 +191,66 @@ class ExtractQueries:
         """
         return self._get_extracts_by_library(library_id, "method")
 
+    def get_all_extracts_by_library(
+        self,
+        library_id: str | UUID,
+    ) -> dict[str, list[dict]]:
+        """
+        Get all extracts for a library, grouped by type (latest job only per paper/type).
+
+        Single query fetches all extracts, then filters in Python to keep only
+        extracts from the most recent job per paper/type combination.
+
+        Args:
+            library_id: UUID of the library
+
+        Returns:
+            Dict with keys 'claims', 'observations', 'methods', each containing list of extracts
+        """
+        # Get paper_ids from library_papers
+        library_papers = (
+            self.db.table("library_papers")
+            .select("paper_id")
+            .eq("library_id", str(library_id))
+            .execute()
+        )
+
+        paper_ids = [row["paper_id"] for row in library_papers.data]
+
+        if not paper_ids:
+            return {"claims": [], "observations": [], "methods": []}
+
+        # Single query for all extracts across all papers
+        result = (
+            self.db.table("extracts")
+            .select("*")
+            .in_("paper_id", paper_ids)
+            .order("created_at", desc=True)
+            .execute()
+        )
+
+        # Group by (paper_id, type) and find latest job_id for each
+        # Then filter to only include extracts from that job
+        latest_job_per_paper_type: dict[tuple[str, str], str | None] = {}
+        for extract in result.data:
+            key = (extract["paper_id"], extract["type"])
+            if key not in latest_job_per_paper_type:
+                # First extract we see is the latest (ordered by created_at desc)
+                latest_job_per_paper_type[key] = extract["job_id"]
+
+        # Filter extracts to only those from the latest job per paper/type
+        filtered: dict[str, list[dict]] = {"claims": [], "observations": [], "methods": []}
+        type_to_key = {"claim": "claims", "observation": "observations", "method": "methods"}
+
+        for extract in result.data:
+            key = (extract["paper_id"], extract["type"])
+            if extract["job_id"] == latest_job_per_paper_type.get(key):
+                output_key = type_to_key.get(extract["type"])
+                if output_key:
+                    filtered[output_key].append(extract)
+
+        return filtered
+
     def _get_extracts_by_library(
         self,
         library_id: str | UUID,
@@ -208,26 +268,9 @@ class ExtractQueries:
         Returns:
             List of extract records
         """
-        # Get paper_ids from library_papers
-        library_papers = (
-            self.db.table("library_papers")
-            .select("paper_id")
-            .eq("library_id", str(library_id))
-            .execute()
-        )
-
-        paper_ids = [row["paper_id"] for row in library_papers.data]
-
-        if not paper_ids:
-            return []
-
-        # For each paper, get only the latest extracts
-        all_extracts = []
-        for paper_id in paper_ids:
-            extracts = self.get_latest_by_paper(paper_id, extract_type)
-            all_extracts.extend(extracts)
-
-        return all_extracts
+        type_to_key = {"claim": "claims", "observation": "observations", "method": "methods"}
+        all_extracts = self.get_all_extracts_by_library(library_id)
+        return all_extracts.get(type_to_key.get(extract_type, ""), [])
 
     def get_unlinked_claims_for_library(
         self,

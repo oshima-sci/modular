@@ -29,6 +29,10 @@ class LibraryPaper(BaseModel):
     filename: str
     storage_path: str
     abstract: str | None = None
+    authors: list[str] = []
+    year: str | None = None
+    journal: str | None = None
+    doi: str | None = None
     added_at: datetime | None = None
 
 
@@ -57,6 +61,12 @@ class LibraryStats(BaseModel):
     total_papers: int = 0
     total_extracts: int = 0
     total_links: int = 0
+
+
+class ProcessingStatus(BaseModel):
+    """Processing status for a library."""
+    papers_processing: int = 0  # number of papers with pending/running jobs
+    library_linking: bool = False  # whether link_library job is pending/running
 
 
 class LibraryMetadata(BaseModel):
@@ -89,6 +99,7 @@ class LibraryFullResponse(BaseModel):
     message: str = "Library retrieved successfully"
     metadata: LibraryMetadata
     data: LibraryData
+    processing: ProcessingStatus = ProcessingStatus()
 
 
 class LibraryCreateRequest(BaseModel):

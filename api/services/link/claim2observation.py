@@ -1,6 +1,7 @@
 """Link claims to observations (evidence) within a library using DSPy."""
 import asyncio
 import logging
+from dataclasses import dataclass
 from typing import Any
 from uuid import UUID
 
@@ -8,6 +9,7 @@ import dspy
 from pydantic import BaseModel, Field
 
 from db import ExtractQueries, VectorQueries
+from services.link.claim2claim_pairwise import UsageStats
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +58,14 @@ class EvidenceLinkingResult(BaseModel):
     total_observations: int
     groups_processed: int
     links: list[EvidenceLink] = Field(default_factory=list)
+
+
+@dataclass
+class C2OLinkingResult:
+    """Result with usage stats for claim-to-observation linking."""
+
+    result: EvidenceLinkingResult
+    stats: UsageStats
 
 
 # --- DSPy Signature ---
@@ -529,21 +539,41 @@ async def _process_claim_async(
             return []
 
 
+def _aggregate_usage_from_history() -> UsageStats:
+    """Aggregate usage stats from all LM history entries."""
+    stats = UsageStats()
+    lm = dspy.settings.lm
+    if lm and lm.history:
+        for entry in lm.history:
+            usage = entry.get("usage", {})
+            cost = entry.get("cost", 0.0)
+            stats.add(usage, cost)
+    return stats
+
+
 async def _link_claims_async(
     claims: list[dict],
     observations: list[dict],
     methods: list[dict],
     methods_lookup: dict[str, dict],
     max_concurrent: int = MAX_CONCURRENT_REQUESTS,
-) -> list[EvidenceLink]:
+) -> tuple[list[EvidenceLink], UsageStats]:
     """
     Run evidence linking on multiple claims concurrently.
 
     Each claim task handles its own method selection and linking sequentially,
     avoiding nested event loop issues.
+
+    Returns:
+        Tuple of (links, usage_stats)
     """
     # Build observation lookups (shared across all tasks)
     observations_by_method, observations_by_paper = _build_observation_lookups(observations)
+
+    # Clear history before run so we only capture this batch
+    lm = dspy.settings.lm
+    if lm:
+        lm.history.clear()
 
     # Run evidence linking concurrently
     semaphore = asyncio.Semaphore(max_concurrent)
@@ -566,17 +596,20 @@ async def _link_claims_async(
 
     results = await asyncio.gather(*tasks)
 
+    # Aggregate usage from all history entries after completion
+    stats = _aggregate_usage_from_history()
+
     all_links: list[EvidenceLink] = []
     for links in results:
         all_links.extend(links)
 
-    return all_links
+    return all_links, stats
 
 
 def link_observations_to_input_claims(
     library_id: str | UUID,
     input_claims: list[dict],
-) -> EvidenceLinkingResult:
+) -> C2OLinkingResult:
     """
     Link input claims against ALL observations in a library.
 
@@ -588,7 +621,7 @@ def link_observations_to_input_claims(
         input_claims: List of claim dicts (must include embeddings)
 
     Returns:
-        EvidenceLinkingResult with discovered evidence links
+        C2OLinkingResult with discovered evidence links and usage stats
     """
     library_id_str = str(library_id)
     logger.info(
@@ -597,12 +630,15 @@ def link_observations_to_input_claims(
 
     if not input_claims:
         logger.info("No input claims provided, skipping c2o linking")
-        return EvidenceLinkingResult(
-            library_id=library_id_str,
-            total_claims=0,
-            total_observations=0,
-            groups_processed=0,
-            links=[],
+        return C2OLinkingResult(
+            result=EvidenceLinkingResult(
+                library_id=library_id_str,
+                total_claims=0,
+                total_observations=0,
+                groups_processed=0,
+                links=[],
+            ),
+            stats=UsageStats(),
         )
 
     # Fetch ALL observations from the library
@@ -611,12 +647,15 @@ def link_observations_to_input_claims(
 
     if not observations:
         logger.info("No observations in library, skipping c2o linking")
-        return EvidenceLinkingResult(
-            library_id=library_id_str,
-            total_claims=len(input_claims),
-            total_observations=0,
-            groups_processed=0,
-            links=[],
+        return C2OLinkingResult(
+            result=EvidenceLinkingResult(
+                library_id=library_id_str,
+                total_claims=len(input_claims),
+                total_observations=0,
+                groups_processed=0,
+                links=[],
+            ),
+            stats=UsageStats(),
         )
 
     # Fetch methods for preselection
@@ -627,20 +666,24 @@ def link_observations_to_input_claims(
     methods_lookup = {m["id"]: m for m in methods}
 
     # Run linking on input claims concurrently
-    all_links = asyncio.run(
+    all_links, stats = asyncio.run(
         _link_claims_async(input_claims, observations, methods, methods_lookup)
     )
 
     # Deduplicate links
     unique_links = _deduplicate_links(all_links)
     logger.info(f"Total unique evidence links found: {len(unique_links)}")
+    logger.info(f"C2O usage: {stats.total_calls} calls, {stats.total_input_tokens} input tokens, {stats.total_output_tokens} output tokens, ${stats.total_cost:.4f}")
 
-    return EvidenceLinkingResult(
-        library_id=library_id_str,
-        total_claims=len(input_claims),
-        total_observations=len(observations),
-        groups_processed=len(input_claims),
-        links=unique_links,
+    return C2OLinkingResult(
+        result=EvidenceLinkingResult(
+            library_id=library_id_str,
+            total_claims=len(input_claims),
+            total_observations=len(observations),
+            groups_processed=len(input_claims),
+            links=unique_links,
+        ),
+        stats=stats,
     )
 
 

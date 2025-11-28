@@ -14,6 +14,7 @@ from models.library import (
     LibraryMetadata,
     LibraryStats,
     LibraryWithPapers,
+    ProcessingStatus,
 )
 from services.link.queue import maybe_queue_link_library_for_library
 
@@ -118,6 +119,7 @@ async def get_library(
             extracts=ExtractsByType(**result["extracts"]),
             links=result["links"],
         ),
+        processing=ProcessingStatus(**result["processing"]),
     )
 
 

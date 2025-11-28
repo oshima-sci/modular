@@ -2,6 +2,8 @@
 import logging
 from typing import Any
 
+import dspy
+
 from db import ExtractQueries, VectorQueries
 from services.extract.claims import extract_claims_from_paper
 from services.extract.methods import extract_methods_from_paper
@@ -49,10 +51,12 @@ def handle_extract_elements(payload: dict[str, Any]) -> dict[str, Any]:
 
     results = {}
 
+    extract_lm = dspy.LM("anthropic/claude-sonnet-4-5-20250929")
+
     # --- Claims Extraction ---
     logger.info("Running claims extraction")
-    claims_result = extract_claims_from_paper(paper_id)
-
+    with dspy.context(lm=extract_lm):
+        claims_result = extract_claims_from_paper(paper_id)
     if claims_result.claims:
         # 1. Save claims to extracts table first
         extract_records = [
@@ -87,7 +91,8 @@ def handle_extract_elements(payload: dict[str, Any]) -> dict[str, Any]:
 
     # --- Methods Extraction ---
     logger.info("Running methods extraction")
-    methods_result = extract_methods_from_paper(paper_id)
+    with dspy.context(lm=extract_lm):
+        methods_result = extract_methods_from_paper(paper_id)
 
     if methods_result.methods:
         # 1. Save methods to extracts table first
@@ -123,7 +128,8 @@ def handle_extract_elements(payload: dict[str, Any]) -> dict[str, Any]:
 
     # --- Observations Extraction (depends on methods) ---
     logger.info("Running observations extraction")
-    observations_result = extract_observations_from_paper(paper_id)
+    with dspy.context(lm=extract_lm):
+        observations_result = extract_observations_from_paper(paper_id)
 
     if observations_result.skipped:
         logger.info("Observations extraction skipped - no methods found")
@@ -163,10 +169,17 @@ def handle_extract_elements(payload: dict[str, Any]) -> dict[str, Any]:
         results["observations_count"] = len(observations_result.observations)
         results["observations_skipped"] = False
 
-    logger.info(f"Extract elements complete: {results}")
+    # Log which model was used (from last history entry)
+    if extract_lm.history:
+        last_entry = extract_lm.history[-1]
+        results["model"] = last_entry.get("model")
+        logger.info(f"Extract elements complete using model={results['model']}: {results}")
+    else:
+        logger.info(f"Extract elements complete: {results}")
 
     # Queue LINK_LIBRARY jobs for any libraries this paper belongs to
-    link_jobs = maybe_queue_link_library(paper_id)
+    # Pass job_id to exclude this job from the "pending processing jobs" check
+    link_jobs = maybe_queue_link_library(paper_id, exclude_job_id=job_id)
     if link_jobs:
         logger.info(f"Queued {len(link_jobs)} LINK_LIBRARY jobs for paper {paper_id}")
 

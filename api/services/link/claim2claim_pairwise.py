@@ -59,7 +59,11 @@ class ClassifyClaimPair(dspy.Signature):
     Given exactly two claims, classify their relationship:
     - NONE: No meaningful relationship
     - DUPLICATE: Claims say the same thing in different words
-    - VARIANT: Claims discuss the same topic but differ without contradicting
+    - VARIANT: Claims talk about the excat same phenomenon or relationship but differ 
+        in some detail about their nature. Variant claims extend their counter part, 
+        impose different conditions, etc. Two variant claims can be true at the same time. 
+        Importantly, claims not immediately variants of each other because they touch upon the same topic.
+        They need to be about the exact same relationship or phenomenon to be variants. 
     - CONTRADICTION: Claims directly disagree and cannot both be true
     - PREMISE_1_TO_2: Claim 1 is a logical premise/foundation for Claim 2
     - PREMISE_2_TO_1: Claim 2 is a logical premise/foundation for Claim 1

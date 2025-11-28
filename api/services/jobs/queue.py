@@ -86,6 +86,7 @@ class JobQueue:
     def has_pending_processing_jobs_for_library(
         self,
         library_id: str | UUID,
+        exclude_job_id: str | UUID | None = None,
     ) -> bool:
         """
         Check if any papers in the library have pending/running processing jobs.
@@ -118,15 +119,16 @@ class JobQueue:
         active_statuses = [JobStatus.PENDING.value, JobStatus.RUNNING.value]
 
         for paper_id in paper_ids:
-            result = (
+            query = (
                 self.db.table("jobs")
                 .select("id")
                 .in_("job_type", processing_types)
                 .in_("status", active_statuses)
                 .eq("payload->>paper_id", paper_id)
-                .limit(1)
-                .execute()
             )
+            if exclude_job_id:
+                query = query.neq("id", str(exclude_job_id))
+            result = query.limit(1).execute()
             if result.data:
                 return True
 

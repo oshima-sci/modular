@@ -87,6 +87,10 @@ def handle_parse_paper(payload: dict[str, Any]) -> dict[str, Any]:
         "metadata": {
             "abstract": metadata.get("abstract"),
             "references": metadata.get("references", []),
+            "authors": metadata.get("authors", []),
+            "year": metadata.get("year"),
+            "journal": metadata.get("journal"),
+            "doi": metadata.get("doi"),
         }
     }
     if parsed_title:

@@ -157,7 +157,7 @@ class LibraryQueries:
             if item.get("papers"):
                 paper = item["papers"]
                 paper_ids.append(paper["id"])
-                # Extract abstract from metadata jsonb
+                # Extract fields from metadata jsonb
                 metadata = paper.get("metadata") or {}
                 papers.append({
                     "id": paper["id"],
@@ -165,14 +165,19 @@ class LibraryQueries:
                     "filename": paper["filename"],
                     "storage_path": paper["storage_path"],
                     "abstract": metadata.get("abstract"),
+                    "authors": metadata.get("authors", []),
+                    "year": metadata.get("year"),
+                    "journal": metadata.get("journal"),
+                    "doi": metadata.get("doi"),
                     "added_at": item["added_at"],
                 })
 
-        # Get latest extracts by type using ExtractQueries
+        # Get all extracts in a single query, grouped by type
         extract_queries = ExtractQueries()
-        claims = extract_queries.get_claims_by_library(library_id)
-        observations = extract_queries.get_observations_by_library(library_id)
-        methods = extract_queries.get_methods_by_library(library_id)
+        extracts_by_type = extract_queries.get_all_extracts_by_library(library_id)
+        claims = extracts_by_type["claims"]
+        observations = extracts_by_type["observations"]
+        methods = extracts_by_type["methods"]
 
         all_extracts = claims + observations + methods
         extract_ids = [e["id"] for e in all_extracts]
@@ -194,4 +199,67 @@ class LibraryQueries:
                 "total_extracts": len(all_extracts),
                 "total_links": len(links),
             },
+            "processing": self.get_processing_status(library_id, paper_ids),
+        }
+
+    def get_processing_status(
+        self, library_id: str | UUID, paper_ids: list[str] | None = None
+    ) -> dict:
+        """
+        Get the processing status for a library.
+
+        Returns count of papers with pending/running jobs and whether
+        the library itself has a pending/running link job.
+
+        Args:
+            library_id: UUID of the library
+            paper_ids: Optional list of paper IDs (to avoid re-fetching)
+
+        Returns:
+            dict with papers_processing (int) and library_linking (bool)
+        """
+        # Get paper IDs if not provided
+        if paper_ids is None:
+            library_papers = (
+                self.db.table("library_papers")
+                .select("paper_id")
+                .eq("library_id", str(library_id))
+                .execute()
+            )
+            paper_ids = [lp["paper_id"] for lp in library_papers.data] if library_papers.data else []
+
+        papers_processing = 0
+        processing_types = ["parse_paper", "extract_elements"]
+        active_statuses = ["pending", "running"]
+
+        # Single query to get all active jobs for papers in this library
+        if paper_ids:
+            paper_id_strs = [str(pid) for pid in paper_ids]
+            result = (
+                self.db.table("jobs")
+                .select("payload->>paper_id")
+                .in_("job_type", processing_types)
+                .in_("status", active_statuses)
+                .in_("payload->>paper_id", paper_id_strs)
+                .execute()
+            )
+            # Count unique papers with active jobs
+            papers_with_jobs = set(row["paper_id"] for row in result.data if row.get("paper_id"))
+            papers_processing = len(papers_with_jobs)
+
+        # Check if library has a pending/running link_library job
+        link_result = (
+            self.db.table("jobs")
+            .select("id")
+            .eq("job_type", "link_library")
+            .in_("status", active_statuses)
+            .eq("payload->>library_id", str(library_id))
+            .limit(1)
+            .execute()
+        )
+        library_linking = len(link_result.data) > 0
+
+        return {
+            "papers_processing": papers_processing,
+            "library_linking": library_linking,
         }

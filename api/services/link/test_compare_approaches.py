@@ -107,9 +107,10 @@ def main():
 
     # Configure DSPy
     lm = dspy.LM(
-        model="anthropic/claude-sonnet-4-5-20250929",
-        api_key=os.getenv("ANTHROPIC_API_KEY"),
-        max_tokens=8000,
+        model="openai/gpt-5-mini-2025-08-07",
+        api_key=os.getenv("OPENAI_API_KEY"),
+        temperature=None,
+        max_tokens=None,
         cache=False,  # Disable cache to get accurate token counts
     )
     dspy.configure(lm=lm)

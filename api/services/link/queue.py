@@ -9,7 +9,7 @@ from services.jobs import JobQueue
 logger = logging.getLogger(__name__)
 
 
-def maybe_queue_link_library(paper_id: str | UUID) -> list[Job]:
+def maybe_queue_link_library(paper_id: str | UUID, exclude_job_id: str | UUID | None = None) -> list[Job]:
     """
     Check if it's safe to queue LINK_LIBRARY jobs for libraries containing this paper.
 
@@ -52,7 +52,8 @@ def maybe_queue_link_library(paper_id: str | UUID) -> list[Job]:
         library_title = library.get("title", "Untitled")
 
         # Check 1: Are there pending/running processing jobs for papers in this library?
-        if job_queue.has_pending_processing_jobs_for_library(library_id):
+        # Exclude the current job (if provided) since it's the one triggering this check
+        if job_queue.has_pending_processing_jobs_for_library(library_id, exclude_job_id=exclude_job_id):
             logger.info(
                 f"Library '{library_title}' ({library_id}) has papers still being processed, "
                 "skipping LINK_LIBRARY job"
