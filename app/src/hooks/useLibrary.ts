@@ -94,5 +94,14 @@ export function useLibrary(libraryId: string | undefined) {
     queryKey: ["library", libraryId],
     queryFn: () => fetchLibrary(libraryId!),
     enabled: !!libraryId,
+    refetchInterval: (query) => {
+      // Poll every 5 seconds while there are no links
+      const data = query.state.data;
+      if (!data || data.data.links.length === 0) {
+        return 5000;
+      }
+      // Stop polling once we have links
+      return false;
+    },
   });
 }

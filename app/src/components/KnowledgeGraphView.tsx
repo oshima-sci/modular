@@ -9,6 +9,7 @@ import {
 } from "@/components/ui/resizable";
 import { KnowledgeGraph } from "./KnowledgeGraph";
 import PdfViewer, { type BBox } from "@/components/PdfViewer";
+import { Link } from "react-router-dom";
 
 // Raw library.json types (shared)
 export interface Paper {
@@ -137,6 +138,11 @@ export const KnowledgeGraphView: React.FC = () => {
 
   return (
     <div className="w-full h-screen">
+      <div className="fixed z-50">
+        <Link to={`/`}>
+          <div className="uppercase p-2 text-black font-semibold">Modular</div>
+        </Link>
+      </div>
       <ResizablePanelGroup direction="horizontal">
         {/* Main graph + details panel */}
         <ResizablePanel defaultSize={pdfPanelOpen ? 65 : 100} minSize={40}>
