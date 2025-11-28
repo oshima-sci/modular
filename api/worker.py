@@ -16,8 +16,6 @@ import uuid
 from datetime import datetime
 from multiprocessing import Process
 
-import dspy
-
 from models import JobStatus, JobType
 from services.jobs import JobQueue, JobHandlers
 
@@ -33,25 +31,12 @@ def configure_logging():
     return logging.getLogger("worker")
 
 
-def configure_dspy():
-    """Configure DSPy for this process."""
-    lm = dspy.LM(
-        'openai/gpt-5-mini-2025-08-07',
-        max_tokens=None,
-        temperature=None,
-        timeout=600,
-    )
-    dspy.configure(lm=lm)
-
-
 def run_worker(worker_num: int, poll_interval: float):
     """Run a single worker in its own process."""
     logger = configure_logging()
     worker_id = f"worker-{worker_num}-{uuid.uuid4().hex[:6]}"
 
-    logger.info(f"[{worker_id}] Starting, configuring DSPy...")
-    configure_dspy()
-    logger.info(f"[{worker_id}] DSPy configured, starting job loop")
+    logger.info(f"[{worker_id}] Starting job loop")
 
     queue = JobQueue()
     handlers = JobHandlers()

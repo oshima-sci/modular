@@ -29,7 +29,10 @@ class ClaimLinkType(str, Enum):
         but cannot both be true. They fundamentally contradict each other. Proving one would refute the other.
         - PREMISE claims are the logical foundation for downstream claims. A downstream claim rests logically
         upon the premise claims. Disproving the premise would disprove the downstream claim, but disproving the
-        downstream claim would not make the premise automatically false too.
+        downstream claim would not make the premise automatically false too. Be reasonable here: Some concept
+        having to exist for some claim referencing that concept to be valid does not make it a premise. 
+        Premise links should reflect evolutions of scientific arguments. They should be meaningful for a scientist
+        in the field to know about.
     """
 
     duplicate = "duplicate"
@@ -45,6 +48,7 @@ class ClaimLink(BaseModel):
     claim_id_1: str = Field(description="UUID of the source claim extract. For links of type premise, this is the premise.")
     claim_id_2: str = Field(description="UUID of the target claim extract. For links of type premise, this is the conclusion or downstream claim.")
     link_type: ClaimLinkType = Field(description="Type of relationship between the claims")
+    strength: float | None = Field(description="Float only for premise links: Indicate the strength of the connection between the two claims. 0.1 means claim 1 is a loosely relevant premise, 1.0 means claim 2 is the directly following conclusion of claim 1")
     reasoning: str = Field(description="Brief explanation of why these claims are linked")
 
 
@@ -83,14 +87,6 @@ class UsageStats:
         self.total_input_tokens += usage.get("prompt_tokens", 0) or usage.get("input_tokens", 0)
         self.total_output_tokens += usage.get("completion_tokens", 0) or usage.get("output_tokens", 0)
         self.total_cost += cost or 0.0
-
-
-@dataclass
-class BatchedLinkingResult:
-    """Result with usage stats."""
-
-    result: LinkingResult
-    stats: UsageStats
 
 
 # --- DSPy Signature ---
@@ -363,6 +359,9 @@ def _deduplicate_links(links: list[ClaimLink]) -> list[ClaimLink]:
 # Max concurrent LLM requests
 MAX_CONCURRENT_REQUESTS = 100
 
+# Default batch size for saving links
+DEFAULT_BATCH_SIZE = 20
+
 
 async def _process_group(
     semaphore: asyncio.Semaphore,
@@ -401,8 +400,20 @@ def _aggregate_usage_from_history() -> UsageStats:
 async def _link_claims_async(
     groups: list[ClaimGroup],
     max_concurrent: int = MAX_CONCURRENT_REQUESTS,
-) -> tuple[list[ClaimLink], UsageStats]:
-    """Run linking on all groups concurrently with semaphore limit."""
+    job_id: str | None = None,
+    valid_claim_ids: set[str] | None = None,
+    batch_size: int = DEFAULT_BATCH_SIZE,
+) -> tuple[list[ClaimLink], UsageStats, int]:
+    """
+    Run linking on all groups concurrently with semaphore limit.
+
+    Saves links to database per-batch for partial progress persistence.
+
+    Returns:
+        Tuple of (all_links, usage_stats, total_saved)
+    """
+    from services.link.db_utils import save_c2c_links
+
     semaphore = asyncio.Semaphore(max_concurrent)
     linker = ClaimLinker()
 
@@ -411,49 +422,85 @@ async def _link_claims_async(
     if lm:
         lm.history.clear()
 
-    tasks = [
-        _process_group(semaphore, linker, group, i)
-        for i, group in enumerate(groups)
-    ]
+    all_links: list[ClaimLink] = []
+    total_saved = 0
 
-    results = await asyncio.gather(*tasks)
+    # Process groups in batches
+    for batch_start in range(0, len(groups), batch_size):
+        batch_end = min(batch_start + batch_size, len(groups))
+        batch_groups = groups[batch_start:batch_end]
+
+        logger.info(f"Processing c2c batch {batch_start // batch_size + 1} (groups {batch_start + 1}-{batch_end})")
+
+        tasks = [
+            _process_group(semaphore, linker, group, batch_start + i)
+            for i, group in enumerate(batch_groups)
+        ]
+
+        results = await asyncio.gather(*tasks)
+
+        # Flatten batch results
+        batch_links: list[ClaimLink] = []
+        for links in results:
+            batch_links.extend(links)
+
+        # Deduplicate within batch
+        batch_unique = _deduplicate_links(batch_links)
+        all_links.extend(batch_unique)
+
+        # Save batch to database (upsert handles cross-batch duplicates)
+        if batch_unique and job_id is not None:
+            saved = save_c2c_links(batch_unique, job_id, valid_claim_ids)
+            total_saved += saved
+            logger.info(f"Saved {saved} c2c links from batch {batch_start // batch_size + 1}")
 
     # Aggregate usage from all history entries after completion
     stats = _aggregate_usage_from_history()
 
-    # Flatten results
-    all_links: list[ClaimLink] = []
-    for links in results:
-        all_links.extend(links)
+    return all_links, stats, total_saved
 
-    return all_links, stats
+
+@dataclass
+class C2CLinkingResult:
+    """Result with usage stats and save count for claim-to-claim linking."""
+
+    result: LinkingResult
+    stats: UsageStats
+    links_saved: int = 0
 
 
 def link_claims(
     input_claims: list[dict],
     library_id: str | UUID,
     similarity_threshold: float = 0.35,
-) -> BatchedLinkingResult:
+    job_id: str | None = None,
+    valid_claim_ids: set[str] | None = None,
+) -> C2CLinkingResult:
     """
     Find links between input claims and all claims in a library.
 
     Computes asymmetric similarity (input_claims x library_claims) so edges
     can only involve input claims. For full library mode, pass all claims as input.
 
+    When job_id is provided, links are saved to the database per-batch during
+    processing for partial progress persistence.
+
     Steps:
     1. Fetch all claims from the library (for comparison targets)
     2. Compute asymmetric similarity matrix (input x library)
     3. Build groups from similarity (each group has an input claim + similar library claims)
-    4. Run DSPy linker on each group (concurrently)
+    4. Run DSPy linker on each group (concurrently), saving per-batch
     5. Deduplicate and return results
 
     Args:
         input_claims: List of claim dicts to link (must have 'id' and 'embedding' keys)
         library_id: UUID of the library for context
         similarity_threshold: Minimum cosine similarity to consider claims related
+        job_id: Optional job ID for associating saved links (enables per-batch saving)
+        valid_claim_ids: Optional set of valid claim IDs for validation
 
     Returns:
-        BatchedLinkingResult with discovered links and usage stats
+        C2CLinkingResult with discovered links, usage stats, and save count
     """
     library_id_str = str(library_id)
     logger.info(f"Starting claim linking for library_id={library_id_str}")
@@ -461,7 +508,7 @@ def link_claims(
 
     if not input_claims:
         logger.info("No input claims to link")
-        return BatchedLinkingResult(
+        return C2CLinkingResult(
             result=LinkingResult(
                 library_id=library_id_str,
                 total_claims=0,
@@ -469,6 +516,7 @@ def link_claims(
                 links=[],
             ),
             stats=UsageStats(),
+            links_saved=0,
         )
 
     # 1. Fetch all claims from library (these are the comparison targets)
@@ -477,7 +525,7 @@ def link_claims(
 
     if len(library_claims) < 2:
         logger.info("Not enough claims in library to link")
-        return BatchedLinkingResult(
+        return C2CLinkingResult(
             result=LinkingResult(
                 library_id=library_id_str,
                 total_claims=len(library_claims),
@@ -485,6 +533,7 @@ def link_claims(
                 links=[],
             ),
             stats=UsageStats(),
+            links_saved=0,
         )
 
     # 2. Compute asymmetric similarity matrix (input x library)
@@ -502,7 +551,7 @@ def link_claims(
 
     if not groups:
         logger.info("No similar claim pairs found involving input claims")
-        return BatchedLinkingResult(
+        return C2CLinkingResult(
             result=LinkingResult(
                 library_id=library_id_str,
                 total_claims=len(library_claims),
@@ -510,18 +559,26 @@ def link_claims(
                 links=[],
             ),
             stats=UsageStats(),
+            links_saved=0,
         )
 
-    # 4. Run linker on all groups concurrently
-    all_links, stats = asyncio.run(_link_claims_async(groups))
+    # 4. Run linker on all groups concurrently (saves per-batch if job_id provided)
+    all_links, stats, total_saved = asyncio.run(
+        _link_claims_async(
+            groups,
+            job_id=job_id,
+            valid_claim_ids=valid_claim_ids,
+        )
+    )
 
-    # 5. Deduplicate links
+    # 5. Deduplicate links (for return value - DB already handles duplicates)
     unique_links = _deduplicate_links(all_links)
     logger.info(f"Total unique links found: {len(unique_links)}")
+    logger.info(f"Total links saved to DB: {total_saved}")
     logger.info(f"Usage: {stats.total_input_tokens} input tokens, {stats.total_output_tokens} output tokens")
     logger.info(f"Total cost: ${stats.total_cost:.4f}")
 
-    return BatchedLinkingResult(
+    return C2CLinkingResult(
         result=LinkingResult(
             library_id=library_id_str,
             total_claims=len(library_claims),
@@ -529,13 +586,15 @@ def link_claims(
             links=unique_links,
         ),
         stats=stats,
+        links_saved=total_saved,
     )
 
 
 def link_claims_in_library(
     library_id: str | UUID,
     similarity_threshold: float = 0.35,
-) -> BatchedLinkingResult:
+    job_id: str | None = None,
+) -> C2CLinkingResult:
     """
     Find and create links between ALL claims in a library.
 
@@ -551,9 +610,10 @@ def link_claims_in_library(
     Args:
         library_id: UUID of the library to process
         similarity_threshold: Minimum cosine similarity to consider claims related
+        job_id: Optional job ID for associating saved links
 
     Returns:
-        BatchedLinkingResult with all discovered links and usage stats
+        C2CLinkingResult with all discovered links, usage stats, and save count
     """
     library_id_str = str(library_id)
     logger.info(f"Starting full claim-to-claim linking for library_id={library_id_str}")
@@ -564,7 +624,7 @@ def link_claims_in_library(
 
     if len(claims) < 2:
         logger.info("Not enough claims to link")
-        return BatchedLinkingResult(
+        return C2CLinkingResult(
             result=LinkingResult(
                 library_id=library_id_str,
                 total_claims=len(claims),
@@ -572,7 +632,11 @@ def link_claims_in_library(
                 links=[],
             ),
             stats=UsageStats(),
+            links_saved=0,
         )
+
+    # Build valid_claim_ids from fetched claims
+    valid_claim_ids = {c["id"] for c in claims}
 
     # Use link_claims with all claims as input (full library mode)
     # Pass claims directly - they already have embeddings
@@ -580,6 +644,8 @@ def link_claims_in_library(
         input_claims=claims,
         library_id=library_id,
         similarity_threshold=similarity_threshold,
+        job_id=job_id,
+        valid_claim_ids=valid_claim_ids,
     )
 
 
@@ -592,21 +658,24 @@ def handle_link_claims(payload: dict[str, Any]) -> dict[str, Any]:
 
     Payload:
         library_id: UUID of the library to link claims within
+        job_id: Optional job ID for associating saved links
 
     Returns:
         Dict with linking results
     """
     library_id = payload["library_id"]
+    job_id = payload.get("job_id")
 
-    batched_result = link_claims_in_library(library_id)
-    result = batched_result.result
-    stats = batched_result.stats
+    c2c_result = link_claims_in_library(library_id, job_id=job_id)
+    result = c2c_result.result
+    stats = c2c_result.stats
 
     return {
         "library_id": result.library_id,
         "total_claims": result.total_claims,
         "groups_processed": result.groups_processed,
         "links_count": len(result.links),
+        "links_saved": c2c_result.links_saved,
         "links": [link.model_dump() for link in result.links],
         "usage": {
             "total_calls": stats.total_calls,

@@ -51,12 +51,13 @@ def handle_extract_elements(payload: dict[str, Any]) -> dict[str, Any]:
 
     results = {}
 
+    # Configure LM for extraction operations
     extract_lm = dspy.LM("anthropic/claude-sonnet-4-5-20250929")
+    dspy.configure(lm=extract_lm)
 
     # --- Claims Extraction ---
     logger.info("Running claims extraction")
-    with dspy.context(lm=extract_lm):
-        claims_result = extract_claims_from_paper(paper_id)
+    claims_result = extract_claims_from_paper(paper_id)
     if claims_result.claims:
         # 1. Save claims to extracts table first
         extract_records = [
@@ -91,8 +92,7 @@ def handle_extract_elements(payload: dict[str, Any]) -> dict[str, Any]:
 
     # --- Methods Extraction ---
     logger.info("Running methods extraction")
-    with dspy.context(lm=extract_lm):
-        methods_result = extract_methods_from_paper(paper_id)
+    methods_result = extract_methods_from_paper(paper_id)
 
     if methods_result.methods:
         # 1. Save methods to extracts table first
@@ -128,8 +128,7 @@ def handle_extract_elements(payload: dict[str, Any]) -> dict[str, Any]:
 
     # --- Observations Extraction (depends on methods) ---
     logger.info("Running observations extraction")
-    with dspy.context(lm=extract_lm):
-        observations_result = extract_observations_from_paper(paper_id)
+    observations_result = extract_observations_from_paper(paper_id)
 
     if observations_result.skipped:
         logger.info("Observations extraction skipped - no methods found")
