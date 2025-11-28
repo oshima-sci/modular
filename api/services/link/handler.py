@@ -4,10 +4,11 @@ import re
 from datetime import datetime
 from typing import Any
 
+import dspy
+
 from db import ExtractQueries
 from db.queries.extract_links import ExtractLinkQueries
-from services.link.claim2claim import add_embeddings_to_claims
-from services.link.claim2claim_pairwise import link_claims_pairwise
+from services.link.claim2claim import add_embeddings_to_claims, link_claims
 from services.link.claim2observation import link_observations_to_input_claims
 
 logger = logging.getLogger(__name__)
@@ -183,6 +184,9 @@ def handle_link_library(payload: dict[str, Any]) -> dict[str, Any]:
 
     logger.info(f"Starting LINK_LIBRARY job for library={library_id}, cutoff={cutoff}")
 
+    # Set up LM for linking operations
+    link_lm = dspy.LM("anthropic/claude-sonnet-4-5-20250929")
+
     # 1. Fetch unlinked claims
     extracts = ExtractQueries()
     unlinked_claims = extracts.get_unlinked_claims_for_library(library_id, cutoff)
@@ -221,14 +225,15 @@ def handle_link_library(payload: dict[str, Any]) -> dict[str, Any]:
     valid_observation_ids = {o["id"] for o in all_observations}
     logger.info(f"Loaded {len(valid_claim_ids)} valid claim IDs, {len(valid_observation_ids)} valid observation IDs")
 
-    # 3. Run claim-to-claim linking (pairwise approach) and save immediately
-    logger.info("Running claim-to-claim linking (pairwise)...")
-    c2c_pairwise_result = link_claims_pairwise(
-        input_claims=claims_with_embeddings,
-        library_id=library_id,
-    )
-    c2c_result = c2c_pairwise_result.result
-    c2c_usage = c2c_pairwise_result.stats
+    # 3. Run claim-to-claim linking (batched approach)
+    logger.info("Running claim-to-claim linking (batched)...")
+    with dspy.context(lm=link_lm):
+        c2c_batched_result = link_claims(
+            input_claims=claims_with_embeddings,
+            library_id=library_id,
+        )
+    c2c_result = c2c_batched_result.result
+    c2c_usage = c2c_batched_result.stats
     logger.info(f"C2C linking found {len(c2c_result.links)} links")
     logger.info(f"C2C usage: {c2c_usage.total_calls} calls, {c2c_usage.total_input_tokens} input tokens, {c2c_usage.total_output_tokens} output tokens, ${c2c_usage.total_cost:.4f}")
 
@@ -238,10 +243,11 @@ def handle_link_library(payload: dict[str, Any]) -> dict[str, Any]:
 
     # 4. Run claim-to-observation linking
     logger.info("Running claim-to-observation linking...")
-    c2o_pairwise_result = link_observations_to_input_claims(
-        library_id=library_id,
-        input_claims=claims_with_embeddings,
-    )
+    with dspy.context(lm=link_lm):
+        c2o_pairwise_result = link_observations_to_input_claims(
+            library_id=library_id,
+            input_claims=claims_with_embeddings,
+        )
     c2o_result = c2o_pairwise_result.result
     c2o_usage = c2o_pairwise_result.stats
     logger.info(f"C2O linking found {len(c2o_result.links)} links")
@@ -250,6 +256,15 @@ def handle_link_library(payload: dict[str, Any]) -> dict[str, Any]:
     # 5. Save c2o links to database
     c2o_saved = _save_c2o_links(c2o_result.links, job_id, valid_claim_ids, valid_observation_ids)
     logger.info(f"Saved {c2o_saved} c2o links")
+
+    # Log which model was used (from last history entry)
+    model_used = None
+    if link_lm.history:
+        last_entry = link_lm.history[-1]
+        model_used = last_entry.get("model")
+        logger.info(f"Link library job complete using model={model_used}")
+    else:
+        logger.info("Link library job complete")
 
     return {
         "library_id": library_id,
@@ -270,5 +285,6 @@ def handle_link_library(payload: dict[str, Any]) -> dict[str, Any]:
             "output_tokens": c2o_usage.total_output_tokens,
             "cost": c2o_usage.total_cost,
         },
+        "model": model_used,
         "status": "complete",
     }

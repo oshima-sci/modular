@@ -63,6 +63,36 @@ class LinkingResult(BaseModel):
     links: list[ClaimLink] = Field(default_factory=list)
 
 
+# --- Token/Cost Tracking ---
+
+from dataclasses import dataclass
+
+
+@dataclass
+class UsageStats:
+    """Aggregated usage statistics."""
+
+    total_calls: int = 0
+    total_input_tokens: int = 0
+    total_output_tokens: int = 0
+    total_cost: float = 0.0
+
+    def add(self, usage: dict, cost: float):
+        """Add stats from a single call."""
+        self.total_calls += 1
+        self.total_input_tokens += usage.get("prompt_tokens", 0) or usage.get("input_tokens", 0)
+        self.total_output_tokens += usage.get("completion_tokens", 0) or usage.get("output_tokens", 0)
+        self.total_cost += cost or 0.0
+
+
+@dataclass
+class BatchedLinkingResult:
+    """Result with usage stats."""
+
+    result: LinkingResult
+    stats: UsageStats
+
+
 # --- DSPy Signature ---
 
 
@@ -356,13 +386,30 @@ async def _process_group(
             return []
 
 
+def _aggregate_usage_from_history() -> UsageStats:
+    """Aggregate usage stats from all LM history entries."""
+    stats = UsageStats()
+    lm = dspy.settings.lm
+    if lm and lm.history:
+        for entry in lm.history:
+            usage = entry.get("usage", {})
+            cost = entry.get("cost", 0.0)
+            stats.add(usage, cost)
+    return stats
+
+
 async def _link_claims_async(
     groups: list[ClaimGroup],
     max_concurrent: int = MAX_CONCURRENT_REQUESTS,
-) -> list[ClaimLink]:
+) -> tuple[list[ClaimLink], UsageStats]:
     """Run linking on all groups concurrently with semaphore limit."""
     semaphore = asyncio.Semaphore(max_concurrent)
     linker = ClaimLinker()
+
+    # Clear history before run so we only capture this batch
+    lm = dspy.settings.lm
+    if lm:
+        lm.history.clear()
 
     tasks = [
         _process_group(semaphore, linker, group, i)
@@ -371,19 +418,22 @@ async def _link_claims_async(
 
     results = await asyncio.gather(*tasks)
 
+    # Aggregate usage from all history entries after completion
+    stats = _aggregate_usage_from_history()
+
     # Flatten results
     all_links: list[ClaimLink] = []
     for links in results:
         all_links.extend(links)
 
-    return all_links
+    return all_links, stats
 
 
 def link_claims(
     input_claims: list[dict],
     library_id: str | UUID,
     similarity_threshold: float = 0.35,
-) -> LinkingResult:
+) -> BatchedLinkingResult:
     """
     Find links between input claims and all claims in a library.
 
@@ -403,7 +453,7 @@ def link_claims(
         similarity_threshold: Minimum cosine similarity to consider claims related
 
     Returns:
-        LinkingResult with discovered links involving input claims
+        BatchedLinkingResult with discovered links and usage stats
     """
     library_id_str = str(library_id)
     logger.info(f"Starting claim linking for library_id={library_id_str}")
@@ -411,11 +461,14 @@ def link_claims(
 
     if not input_claims:
         logger.info("No input claims to link")
-        return LinkingResult(
-            library_id=library_id_str,
-            total_claims=0,
-            groups_processed=0,
-            links=[],
+        return BatchedLinkingResult(
+            result=LinkingResult(
+                library_id=library_id_str,
+                total_claims=0,
+                groups_processed=0,
+                links=[],
+            ),
+            stats=UsageStats(),
         )
 
     # 1. Fetch all claims from library (these are the comparison targets)
@@ -424,11 +477,14 @@ def link_claims(
 
     if len(library_claims) < 2:
         logger.info("Not enough claims in library to link")
-        return LinkingResult(
-            library_id=library_id_str,
-            total_claims=len(library_claims),
-            groups_processed=0,
-            links=[],
+        return BatchedLinkingResult(
+            result=LinkingResult(
+                library_id=library_id_str,
+                total_claims=len(library_claims),
+                groups_processed=0,
+                links=[],
+            ),
+            stats=UsageStats(),
         )
 
     # 2. Compute asymmetric similarity matrix (input x library)
@@ -446,32 +502,40 @@ def link_claims(
 
     if not groups:
         logger.info("No similar claim pairs found involving input claims")
-        return LinkingResult(
-            library_id=library_id_str,
-            total_claims=len(library_claims),
-            groups_processed=0,
-            links=[],
+        return BatchedLinkingResult(
+            result=LinkingResult(
+                library_id=library_id_str,
+                total_claims=len(library_claims),
+                groups_processed=0,
+                links=[],
+            ),
+            stats=UsageStats(),
         )
 
     # 4. Run linker on all groups concurrently
-    all_links = asyncio.run(_link_claims_async(groups))
+    all_links, stats = asyncio.run(_link_claims_async(groups))
 
     # 5. Deduplicate links
     unique_links = _deduplicate_links(all_links)
     logger.info(f"Total unique links found: {len(unique_links)}")
+    logger.info(f"Usage: {stats.total_input_tokens} input tokens, {stats.total_output_tokens} output tokens")
+    logger.info(f"Total cost: ${stats.total_cost:.4f}")
 
-    return LinkingResult(
-        library_id=library_id_str,
-        total_claims=len(library_claims),
-        groups_processed=len(groups),
-        links=unique_links,
+    return BatchedLinkingResult(
+        result=LinkingResult(
+            library_id=library_id_str,
+            total_claims=len(library_claims),
+            groups_processed=len(groups),
+            links=unique_links,
+        ),
+        stats=stats,
     )
 
 
 def link_claims_in_library(
     library_id: str | UUID,
     similarity_threshold: float = 0.35,
-) -> LinkingResult:
+) -> BatchedLinkingResult:
     """
     Find and create links between ALL claims in a library.
 
@@ -489,7 +553,7 @@ def link_claims_in_library(
         similarity_threshold: Minimum cosine similarity to consider claims related
 
     Returns:
-        LinkingResult with all discovered links
+        BatchedLinkingResult with all discovered links and usage stats
     """
     library_id_str = str(library_id)
     logger.info(f"Starting full claim-to-claim linking for library_id={library_id_str}")
@@ -500,11 +564,14 @@ def link_claims_in_library(
 
     if len(claims) < 2:
         logger.info("Not enough claims to link")
-        return LinkingResult(
-            library_id=library_id_str,
-            total_claims=len(claims),
-            groups_processed=0,
-            links=[],
+        return BatchedLinkingResult(
+            result=LinkingResult(
+                library_id=library_id_str,
+                total_claims=len(claims),
+                groups_processed=0,
+                links=[],
+            ),
+            stats=UsageStats(),
         )
 
     # Use link_claims with all claims as input (full library mode)
@@ -531,7 +598,9 @@ def handle_link_claims(payload: dict[str, Any]) -> dict[str, Any]:
     """
     library_id = payload["library_id"]
 
-    result = link_claims_in_library(library_id)
+    batched_result = link_claims_in_library(library_id)
+    result = batched_result.result
+    stats = batched_result.stats
 
     return {
         "library_id": result.library_id,
@@ -539,4 +608,10 @@ def handle_link_claims(payload: dict[str, Any]) -> dict[str, Any]:
         "groups_processed": result.groups_processed,
         "links_count": len(result.links),
         "links": [link.model_dump() for link in result.links],
+        "usage": {
+            "total_calls": stats.total_calls,
+            "input_tokens": stats.total_input_tokens,
+            "output_tokens": stats.total_output_tokens,
+            "cost": stats.total_cost,
+        },
     }

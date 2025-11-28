@@ -85,9 +85,9 @@ class LinkClaimToObservations(dspy.Signature):
     - CONTEXTUALIZES: The observation provides relevant context (scope, conditions, related findings)
       without directly supporting or contradicting the claim
 
-    Only create links where there is a clear evidential relationship.
+    Only create links where there is a clear evidential relationship in the empirical, scientific sense.
     Use the observation and claim ids provided in the input in your response.
-
+    
     If the method examines the exact phenomenon or relationship the claim addresses, it's likely that the observations
     coming out of it provide evidence for or against the claim.
     If the method doesn't directly examine the exact phenomenon or relationship but relevant and related concepts,

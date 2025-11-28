@@ -71,6 +71,8 @@ class ExtractClaims(dspy.Signature):
         -> This is an empirical observation, not a conclusive statement. It is not a claim.
     - "This question needs to be investigated further."
         -> This is a statement indiciating need for further research. There is no insight about anything in here. Not a claim.
+    - "Fact checking can be formulated as an NLP task: the assessment of the truthfulness of a claim."
+        -> This is a statement of definiton setting the context of the work. It is not a core scientific contribution.
 
     Claims are usually found in the abstract and/or discussion/conclusion section of the paper.
     The title will also often give you a good hint at what the core insight of the paper is.
