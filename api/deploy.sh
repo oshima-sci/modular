@@ -236,7 +236,7 @@ After=network.target
 [Service]
 WorkingDirectory=/srv/oshi/oshimaweb/api
 EnvironmentFile=/srv/oshi/oshimaweb/api/.env
-ExecStart=/bin/bash /srv/oshi/oshimaweb/api/start.sh --workers 4
+ExecStart=/bin/bash /srv/oshi/oshimaweb/api/start.sh --workers 16
 Restart=always
 RestartSec=5
 

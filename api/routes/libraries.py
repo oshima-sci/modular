@@ -16,6 +16,7 @@ from models.library import (
     LibraryWithPapers,
     ProcessingStatus,
 )
+from services.jobs import JobQueue
 from services.link.queue import maybe_queue_link_library_for_library
 
 router = APIRouter(prefix="/api/library", tags=["libraries"])
@@ -104,6 +105,11 @@ async def get_library(
     user_id = user.user_id if user else None
     if library["owner_id"] and library["owner_id"] != user_id:
         raise HTTPException(status_code=403, detail="Not authorized to view this library")
+
+    # Auto-trigger linking if library is idle and has unlinked extracts
+    job_queue = JobQueue()
+    if job_queue.should_queue_link_library(library_id):
+        maybe_queue_link_library_for_library(library_id)
 
     return LibraryFullResponse(
         metadata=LibraryMetadata(

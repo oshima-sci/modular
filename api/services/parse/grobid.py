@@ -37,7 +37,8 @@ class GrobidParser:
         response = requests.post(
             f"{self.base_url}/api/processFulltextDocument",
             files=files,
-            data=data
+            data=data,
+            timeout=300  # 5 minute timeout - PDFs can take a while
         )
 
         response.raise_for_status()

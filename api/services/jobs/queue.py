@@ -204,3 +204,54 @@ class JobQueue:
             # Handle ISO format with timezone
             return datetime.fromisoformat(claimed_at_str.replace("Z", "+00:00"))
         return claimed_at_str
+
+    def has_unlinked_extracts_for_library(self, library_id: str | UUID) -> bool:
+        """
+        Check if a library has extracts that haven't been processed by a linking job.
+
+        Returns True if:
+        - No previous link job exists AND library has claims and observations, OR
+        - There are extracts created after the last completed link job
+
+        Args:
+            library_id: UUID of the library
+
+        Returns:
+            True if there are unlinked extracts, False otherwise
+        """
+        from db.queries.extracts import ExtractQueries
+
+        extract_queries = ExtractQueries()
+        last_link_at = self.get_previous_link_job_claimed_at(library_id)
+
+        if last_link_at is None:
+            # Never linked - check if library has both claims and observations
+            extracts = extract_queries.get_all_extracts_by_library(library_id)
+            return len(extracts["claims"]) > 0 and len(extracts["observations"]) > 0
+
+        # Check if there are claims created after the cutoff
+        unlinked_claims = extract_queries.get_unlinked_claims_for_library(
+            library_id, cutoff=last_link_at
+        )
+        return len(unlinked_claims) > 0
+
+    def should_queue_link_library(self, library_id: str | UUID) -> bool:
+        """
+        Check if a LINK_LIBRARY job should be queued for this library.
+
+        Returns True if:
+        1. No papers are currently processing
+        2. No recent pending link job exists
+        3. There are unlinked extracts (new or created after last link job)
+
+        Args:
+            library_id: UUID of the library
+
+        Returns:
+            True if linking should be queued, False otherwise
+        """
+        if self.has_pending_processing_jobs_for_library(library_id):
+            return False
+        if self.has_recent_pending_link_job(library_id):
+            return False
+        return self.has_unlinked_extracts_for_library(library_id)

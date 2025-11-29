@@ -1,6 +1,6 @@
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 __release_notes__ = """
 
-Initial deployment of modular API
+16 workers, grobid timeout
 
 """
