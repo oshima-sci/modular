@@ -70,6 +70,7 @@ export interface Link {
   linkType: string;
   linkCategory: string;
   reasoning: string;
+  strength: number | null;
 }
 
 export interface GraphData {
