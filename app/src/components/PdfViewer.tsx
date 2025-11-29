@@ -121,10 +121,10 @@ export default function PdfViewer({ pdfUrl, bboxes = [], highlightedId, onBboxCl
                 return (
                   <div
                     key={bbox.id}
-                    className={`absolute border-2 cursor-pointer transition-colors ${
+                    className={`absolute p-1 cursor-pointer transition-colors ${
                       isHighlighted
-                        ? 'border-yellow-500 bg-yellow-200/30'
-                        : 'border-blue-400 bg-blue-200/20 hover:bg-blue-200/40'
+                        ? 'bg-yellow-600/30'
+                        : 'bg-yellow-600/30 hover:bg-blue-200/40'
                     }`}
                     style={style}
                     onClick={() => onBboxClick?.(bbox.id)}

@@ -207,6 +207,7 @@ const HoverEdge = ({
   style,
   markerEnd,
 }: EdgeProps) => {
+  const edgeData = data as { linkType?: string; reasoning?: string } | undefined;
   const [isHovered, setIsHovered] = useState(false);
   const [edgePath, labelX, labelY] = getBezierPath({
     sourceX,
@@ -238,7 +239,7 @@ const HoverEdge = ({
         strokeWidth={style?.strokeWidth as number || 1}
         {...(markerEnd ? { markerEnd: String(markerEnd) } : {})}
       />
-      {isHovered && data?.reasoning && (
+      {isHovered && edgeData?.reasoning && (
         <EdgeLabelRenderer>
           <div
             className="absolute bg-white/95 backdrop-blur-sm px-3 py-2 rounded-lg shadow-lg border border-gray-200 max-w-[300px] text-xs text-gray-700 leading-relaxed pointer-events-none z-50"
@@ -247,9 +248,9 @@ const HoverEdge = ({
             }}
           >
             <div className="font-medium text-gray-500 mb-1 text-[10px] uppercase tracking-wide">
-              {String(data.linkType)}
+              {edgeData.linkType}
             </div>
-            {String(data.reasoning)}
+            {edgeData.reasoning}
           </div>
         </EdgeLabelRenderer>
       )}

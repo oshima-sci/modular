@@ -9,6 +9,10 @@ export interface LibraryPaper {
   filename: string;
   storage_path: string;
   abstract: string | null;
+  authors: string[];
+  year: string | null;
+  journal: string | null;
+  doi: string | null;
   added_at: string | null;
 }
 
@@ -59,6 +63,11 @@ export interface LibraryStats {
   total_links: number;
 }
 
+export interface ProcessingStatus {
+  papers_processing: number;
+  library_linking: boolean;
+}
+
 export interface LibraryMetadata {
   id: string;
   owner_id: string | null;
@@ -79,6 +88,7 @@ export interface LibraryFullResponse {
   message: string;
   metadata: LibraryMetadata;
   data: LibraryData;
+  processing: ProcessingStatus;
 }
 
 async function fetchLibrary(libraryId: string): Promise<LibraryFullResponse> {
@@ -95,12 +105,16 @@ export function useLibrary(libraryId: string | undefined) {
     queryFn: () => fetchLibrary(libraryId!),
     enabled: !!libraryId,
     refetchInterval: (query) => {
-      // Poll every 5 seconds while there are no links
+      // Poll every 5 seconds while processing is ongoing
       const data = query.state.data;
-      if (!data || data.data.links.length === 0) {
+      if (!data) {
         return 5000;
       }
-      // Stop polling once we have links
+      const { processing } = data;
+      if (processing.library_linking || processing.papers_processing > 0) {
+        return 5000;
+      }
+      // Stop polling once library linking is done and no papers are processing
       return false;
     },
   });

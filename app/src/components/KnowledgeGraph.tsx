@@ -22,6 +22,10 @@ interface Paper {
   title: string | null;
   filename: string;
   abstract: string | null;
+  authors: string[];
+  year: string | null;
+  journal: string | null;
+  doi: string | null;
 }
 
 interface Method {
@@ -98,7 +102,7 @@ const NodeDetails: React.FC<NodeDetailsProps> = ({ node, papersMap, methodsMap, 
       <div className={`w-full text-left p-3 text-sm rounded-lg leading-relaxed ${
         node.type === 'claim'
           ? 'bg-orange-50 text-orange-900 border border-orange-200'
-          : 'bg-green-50 text-green-900 border border-green-200'
+          : 'bg-blue-50 text-blue-900 border border-blue-200'
       }`}>
         {node.displayText}
       </div>
@@ -111,17 +115,32 @@ const NodeDetails: React.FC<NodeDetailsProps> = ({ node, papersMap, methodsMap, 
         <div className="flex flex-col gap-1">
           {node.paperIds.map((paperId) => {
             const paper = papersMap.get(paperId);
+            // Get first author's last name
+            const firstAuthorLastName = paper?.authors?.[0]?.split(' ').pop() || null;
+            const citation = firstAuthorLastName && paper?.year
+              ? `${firstAuthorLastName} et al. (${paper.year})`
+              : firstAuthorLastName
+              ? `${firstAuthorLastName} et al.`
+              : paper?.year
+              ? `(${paper.year})`
+              : 'null';
             return (
-              <button
-                key={paperId}
-                onClick={() => onPaperClick?.(paperId)}
-                className="text-sm text-gray-700 bg-gray-50 px-2 py-1 rounded text-left hover:bg-blue-50 hover:text-blue-700 transition-colors cursor-pointer flex items-center gap-2"
-              >
-                <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                </svg>
-                <span className="truncate">{paper?.title || paperId}</span>
-              </button>
+              <div key={paperId}>
+                <p className="text-xs font-semibold text-gray-700 mb-0.5">{paper?.title || paperId}</p>
+                {citation && (
+                  <p className="text-xs text-gray-700 ">{citation}</p>
+                )}
+
+                <button
+                  onClick={() => onPaperClick?.(paperId)}
+                  className="text-sm text-gray-700 bg-gray-50 px-2 py-1 rounded text-left hover:bg-blue-50 hover:text-blue-700 transition-colors cursor-pointer flex items-center gap-2 mt-1"
+                >
+                  <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                  </svg>
+                  View Source
+                </button>
+              </div>
             );
           })}
         </div>
@@ -282,9 +301,10 @@ const NodeDetails: React.FC<NodeDetailsProps> = ({ node, papersMap, methodsMap, 
 interface EdgeDetailsProps {
   link: Link;
   graphData: GraphData;
+  onViewSource?: (nodeId: string) => void;
 }
 
-const EdgeDetails: React.FC<EdgeDetailsProps> = ({ link, graphData }) => {
+const EdgeDetails: React.FC<EdgeDetailsProps> = ({ link, graphData, onViewSource }) => {
   const sourceId = typeof link.source === "object" ? link.source.id : link.source;
   const targetId = typeof link.target === "object" ? link.target.id : link.target;
 
@@ -313,21 +333,11 @@ const EdgeDetails: React.FC<EdgeDetailsProps> = ({ link, graphData }) => {
     if (!node) return 'bg-gray-50 text-gray-700 border border-gray-200';
     return node.type === 'claim'
       ? 'bg-orange-50 text-orange-900 border border-orange-200'
-      : 'bg-green-50 text-green-900 border border-green-200';
+      : 'bg-blue-50 text-blue-900 border border-blue-200';
   };
 
   return (
     <div className="flex flex-col gap-4">
-      {/* Link Type Badge */}
-      <div className="flex items-center gap-2">
-        <span className={`text-xs font-medium px-2 py-1 rounded ${getLinkTypeColor(link.linkType)}`}>
-          {link.linkType.toUpperCase()}
-        </span>
-        <span className="text-xs text-gray-400">
-          {link.linkCategory.replace(/_/g, ' ')}
-        </span>
-      </div>
-
       {/* First Node (Claim for claim_to_obs, Source otherwise) */}
       <div>
         <h5 className="text-[10px] uppercase tracking-widest font-bold text-gray-500 mb-2">
@@ -338,24 +348,45 @@ const EdgeDetails: React.FC<EdgeDetailsProps> = ({ link, graphData }) => {
             <span className="flex-1">{firstNode?.displayText || sourceId}</span>
             {firstNode && (
               <span className={`text-[9px] font-medium px-1.5 py-0.5 rounded whitespace-nowrap flex-shrink-0 ${
-                firstNode.type === 'claim' ? 'bg-orange-100 text-orange-700' : 'bg-green-100 text-green-700'
+                firstNode.type === 'claim' ? 'bg-orange-100 text-orange-700' : 'bg-blue-100 text-blue-700'
               }`}>
                 {firstNode.type.toUpperCase()}
               </span>
             )}
           </div>
         </div>
+        {firstNode && (
+          <button
+            onClick={() => onViewSource?.(firstNode.id)}
+            className="mt-1 text-[10px] text-blue-500 hover:text-blue-700 flex items-center gap-1"
+          >
+            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+            </svg>
+            View Source
+          </button>
+        )}
       </div>
 
-      {/* Arrow indicator - points up for claim_to_obs (from observation to claim) */}
-      <div className="flex justify-center text-gray-400">
-        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-          {isClaimToObs ? (
+      {/* Arrow indicator with link type badge */}
+      <div className="flex justify-center items-center gap-2">
+        <svg className="text-gray-900" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          {link.linkType === 'variant' ? (
+            /* Bidirectional arrow for variant links */
+            <>
+              <path d="M12 5v14" />
+              <path d="M5 9l7-4 7 4" />
+              <path d="M5 15l7 4 7-4" />
+            </>
+          ) : isClaimToObs ? (
             <path d="M12 19V5M5 12l7-7 7 7" />
           ) : (
             <path d="M12 5v14M5 12l7 7 7-7" />
           )}
         </svg>
+        <span className={`text-xs font-medium px-2 py-1 rounded ${getLinkTypeColor(link.linkType)}`}>
+          {link.linkType.toUpperCase()}
+        </span>
       </div>
 
       {/* Second Node (Observation for claim_to_obs, Target otherwise) */}
@@ -368,13 +399,24 @@ const EdgeDetails: React.FC<EdgeDetailsProps> = ({ link, graphData }) => {
             <span className="flex-1">{secondNode?.displayText || targetId}</span>
             {secondNode && (
               <span className={`text-[9px] font-medium px-1.5 py-0.5 rounded whitespace-nowrap flex-shrink-0 ${
-                secondNode.type === 'claim' ? 'bg-orange-100 text-orange-700' : 'bg-green-100 text-green-700'
+                secondNode.type === 'claim' ? 'bg-orange-100 text-orange-700' : 'bg-blue-100 text-blue-700'
               }`}>
                 {secondNode.type.toUpperCase()}
               </span>
             )}
           </div>
         </div>
+        {secondNode && (
+          <button
+            onClick={() => onViewSource?.(secondNode.id)}
+            className="mt-1 text-[10px] text-blue-500 hover:text-blue-700 flex items-center gap-1"
+          >
+            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+            </svg>
+            View Source
+          </button>
+        )}
       </div>
 
       {/* Reasoning */}
@@ -428,6 +470,15 @@ export const KnowledgeGraph: React.FC<KnowledgeGraphProps> = ({
   const [graphData, setGraphData] = useState<GraphData | null>(null);
   const [showClaims, setShowClaims] = useState<boolean>(true);
   const [showObservations, setShowObservations] = useState<boolean>(false);
+
+  // Link type visibility - claim-to-claim links
+  const [showPremiseLinks, setShowPremiseLinks] = useState<boolean>(true);
+  const [showVariantLinks] = useState<boolean>(true);
+  const [showClaimContradictsLinks, setShowClaimContradictsLinks] = useState<boolean>(true);
+  // Link type visibility - claim-to-observation links
+  const [showSupportsLinks, setShowSupportsLinks] = useState<boolean>(true);
+  const [showContradictsLinks, setShowContradictsLinks] = useState<boolean>(true);
+  const [showContextualizesLinks, setShowContextualizesLinks] = useState<boolean>(true);
 
   // Track container size for ForceGraph2D
   useEffect(() => {
@@ -644,7 +695,7 @@ export const KnowledgeGraph: React.FC<KnowledgeGraphProps> = ({
 
   const getNodeColor = (node: Node) => {
     if (node.type === "claim") return "#f97316"; // Orange for claims
-    if (node.type === "observation") return "#22c55e"; // Green for observations
+    if (node.type === "observation") return "#3b82f6"; // Blue for observations
     return "#aaa";
   };
 
@@ -653,25 +704,82 @@ export const KnowledgeGraph: React.FC<KnowledgeGraphProps> = ({
     return node.displayText || node.id;
   };
 
+  // Compute counts for nodes and link types
+  const counts = useMemo(() => {
+    if (!graphData) return {
+      claims: 0,
+      observations: 0,
+      premiseLinks: 0,
+      variantLinks: 0,
+      claimContradictsLinks: 0,
+      supportsLinks: 0,
+      contradictsLinks: 0,
+      contextualizesLinks: 0,
+    };
+
+    const claims = graphData.nodes.filter(n => n.type === "claim").length;
+    const observations = graphData.nodes.filter(n => n.type === "observation").length;
+
+    let premiseLinks = 0;
+    let variantLinks = 0;
+    let claimContradictsLinks = 0;
+    let supportsLinks = 0;
+    let contradictsLinks = 0;
+    let contextualizesLinks = 0;
+
+    graphData.links.forEach(link => {
+      if (link.linkCategory === "claim_to_claim") {
+        if (link.linkType === "premise") premiseLinks++;
+        else if (link.linkType === "variant") variantLinks++;
+        else if (link.linkType === "contradiction") claimContradictsLinks++;
+      } else if (link.linkCategory === "claim_to_observation") {
+        if (link.linkType === "supports") supportsLinks++;
+        else if (link.linkType === "contradiction") contradictsLinks++;
+        else if (link.linkType === "contextualizes") contextualizesLinks++;
+      }
+    });
+
+    return {
+      claims,
+      observations,
+      premiseLinks,
+      variantLinks,
+      claimContradictsLinks,
+      supportsLinks,
+      contradictsLinks,
+      contextualizesLinks,
+    };
+  }, [graphData]);
+
   // Filter nodes based on visibility toggles
   const filteredGraphData: GraphData | null = useMemo(() => {
     if (!graphData) return null;
 
+    // First, find all node IDs that have at least one link
+    const nodesWithLinks = new Set<string>();
+    graphData.links.forEach((link) => {
+      const src = typeof link.source === "object" ? link.source.id : link.source;
+      const tgt = typeof link.target === "object" ? link.target.id : link.target;
+      nodesWithLinks.add(src);
+      nodesWithLinks.add(tgt);
+    });
+
     const filteredNodes = graphData.nodes.filter((node) => {
       if (node.type === "claim" && !showClaims) return false;
       if (node.type === "observation" && !showObservations) return false;
+      // Filter out observation nodes with no links
+      if (node.type === "observation" && !nodesWithLinks.has(node.id)) return false;
       return true;
     });
+
+    const filteredNodeIds = new Set(filteredNodes.map(n => n.id));
 
     const filteredLinks = graphData.links.filter((link) => {
       const src = typeof link.source === "object" ? link.source.id : link.source;
       const tgt = typeof link.target === "object" ? link.target.id : link.target;
 
-      // Check if both source and target nodes exist in filtered nodes
-      const sourceExists = filteredNodes.some(n => n.id === src);
-      const targetExists = filteredNodes.some(n => n.id === tgt);
-
-      return sourceExists && targetExists;
+      // Only filter by node existence - link type visibility is handled in linkColor
+      return filteredNodeIds.has(src) && filteredNodeIds.has(tgt);
     });
 
     return { nodes: filteredNodes, links: filteredLinks };
@@ -831,39 +939,6 @@ export const KnowledgeGraph: React.FC<KnowledgeGraphProps> = ({
     onClearSelection();
   };
 
-  // Determine what to show in panel header
-  const getPanelHeaderText = () => {
-    if (panelLink) {
-      return `${panelLink.linkType} link`;
-    }
-    if (panelNode) {
-      return getNodeLabelText(panelNode);
-    }
-    return "Hover over a node or edge";
-  };
-
-  const getPanelHeaderBadge = () => {
-    if (panelLink) {
-      return (
-        <span className="text-[10px] font-medium px-2 py-0.5 rounded text-blue-600 bg-blue-100">
-          EDGE
-        </span>
-      );
-    }
-    if (panelNode) {
-      return (
-        <span className={`text-[10px] font-medium px-2 py-0.5 rounded ${
-          panelNode.type === 'claim'
-            ? 'text-orange-600 bg-orange-100'
-            : 'text-green-600 bg-green-100'
-        }`}>
-          {panelNode.type.toUpperCase()}
-        </span>
-      );
-    }
-    return null;
-  };
-
   return (
     <ResizablePanelGroup direction="horizontal" className="h-full">
       {/* Graph Canvas */}
@@ -877,7 +952,17 @@ export const KnowledgeGraph: React.FC<KnowledgeGraphProps> = ({
               graphData={filteredGraphData}
               nodeAutoColorBy="type"
               linkColor={(link: any) => {
-                if (link.linkType === "variant") return "transparent";
+                // Check if link type is hidden - make transparent
+                if (link.linkCategory === "claim_to_claim") {
+                  if (link.linkType === "premise" && !showPremiseLinks) return "transparent";
+                  if (link.linkType === "variant" && !showVariantLinks) return "transparent";
+                  if (link.linkType === "contradiction" && !showClaimContradictsLinks) return "transparent";
+                } else if (link.linkCategory === "claim_to_observation") {
+                  if (link.linkType === "supports" && !showSupportsLinks) return "transparent";
+                  if (link.linkType === "contradiction" && !showContradictsLinks) return "transparent";
+                  if (link.linkType === "contextualizes" && !showContextualizesLinks) return "transparent";
+                }
+
                 const src = typeof link.source === "object" ? link.source.id : link.source;
                 const tgt = typeof link.target === "object" ? link.target.id : link.target;
 
@@ -941,8 +1026,10 @@ export const KnowledgeGraph: React.FC<KnowledgeGraphProps> = ({
               }}
               backgroundColor="#f8fafc"
               nodeRelSize={6}
-              linkDirectionalParticles={(link: any) => link.linkType === "premise" ? 1 : 0}
-              linkDirectionalParticleWidth={2}
+              linkDirectionalArrowLength={(link: any) =>
+                (link.linkType === "premise" || link.linkType === "contradiction") ? 5 : 0
+              }
+              linkDirectionalArrowRelPos={1}
               nodeCanvasObject={(node: any, ctx) => {
                 const n = node as Node;
                 const nodeSize = selectedNode && n.id === selectedNode.id ? 9 : 6;
@@ -959,11 +1046,11 @@ export const KnowledgeGraph: React.FC<KnowledgeGraphProps> = ({
                 ctx.fillStyle = color;
                 ctx.fill();
 
-                // For claim nodes with evidence, draw pill badge
+                // For claim nodes with evidence, draw pill badge at bottom right
                 if (n.type === "claim") {
                   const evidenceCount = claimEvidenceCounts.get(n.id) || 0;
                   if (evidenceCount > 0) {
-                    const label = `${evidenceCount} obs`;
+                    const label = `${evidenceCount} EV`;
                     const fontSize = 4;
                     ctx.font = `bold ${fontSize}px Sans-Serif`;
                     const textWidth = ctx.measureText(label).width;
@@ -972,8 +1059,11 @@ export const KnowledgeGraph: React.FC<KnowledgeGraphProps> = ({
                     const paddingY = 2;
                     const badgeWidth = textWidth + paddingX * 2;
                     const badgeHeight = fontSize + paddingY * 2;
-                    const badgeX = node.x + nodeSize + 2;
-                    const badgeY = node.y - badgeHeight / 2;
+                    // Position at bottom right, overlapping with node
+                    const offsetX = nodeSize * 0.5;  // Overlap horizontally
+                    const offsetY = nodeSize * 0.5;  // Overlap vertically
+                    const badgeX = node.x + offsetX;
+                    const badgeY = node.y + offsetY - badgeHeight / 2;
                     const borderRadius = badgeHeight / 2;
 
                     // Badge background (pill shape)
@@ -986,7 +1076,7 @@ export const KnowledgeGraph: React.FC<KnowledgeGraphProps> = ({
                     ctx.textAlign = "left";
                     ctx.textBaseline = "middle";
                     ctx.fillStyle = "#fff";
-                    ctx.fillText(label, badgeX + paddingX, node.y);
+                    ctx.fillText(label, badgeX + paddingX, node.y + offsetY);
                   }
                 }
               }}
@@ -998,25 +1088,100 @@ export const KnowledgeGraph: React.FC<KnowledgeGraphProps> = ({
                 ctx.fillStyle = color;
                 ctx.fill();
               }}
+              linkPointerAreaPaint={(link: any, invisibleColor, ctx) => {
+                // Don't paint pointer area for hidden link types - makes them non-interactive
+                if (link.linkCategory === "claim_to_claim") {
+                  if (link.linkType === "premise" && !showPremiseLinks) return;
+                  if (link.linkType === "variant" && !showVariantLinks) return;
+                  if (link.linkType === "contradiction" && !showClaimContradictsLinks) return;
+                } else if (link.linkCategory === "claim_to_observation") {
+                  if (link.linkType === "supports" && !showSupportsLinks) return;
+                  if (link.linkType === "contradiction" && !showContradictsLinks) return;
+                  if (link.linkType === "contextualizes" && !showContextualizesLinks) return;
+                }
+
+                // Default pointer area painting for visible links
+                const start = link.source;
+                const end = link.target;
+                if (typeof start !== 'object' || typeof end !== 'object') return;
+
+                ctx.strokeStyle = invisibleColor;
+                ctx.lineWidth = 6; // Wider hit area for easier interaction
+                ctx.beginPath();
+                ctx.moveTo(start.x, start.y);
+                ctx.lineTo(end.x, end.y);
+                ctx.stroke();
+              }}
             />
           ) : (
             <div className="flex items-center justify-center w-full h-full">
               <div className="text-lg text-gray-600 font-medium">Loading graph...</div>
             </div>
           )}
-          {/* Reset button */}
-          <Button
-            variant="outline"
-            size="sm"
-            className="absolute bottom-4 left-4 bg-white/90 backdrop-blur-sm"
-            onClick={() => window.location.reload()}
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
-              <path d="M3 3v5h5" />
-            </svg>
-            Reset Layout
-          </Button>
+          {/* Bottom controls: toggles and reset button */}
+          <div className="absolute bottom-4 left-4 flex items-center gap-3 bg-white/90 backdrop-blur-sm rounded-lg p-2">
+            {/* Claims toggle with link types */}
+            <div className="flex flex-col gap-1">
+              <Button size="sm" variant={showClaims ? "default" : "secondary"} onClick={() => setShowClaims(!showClaims)}>
+                Claims ({counts.claims})
+              </Button>
+              <div className="flex gap-1">
+                <Button
+                  size="sm"
+                  variant={!showClaims ? "ghost" : showPremiseLinks ? "default" : "secondary"}
+                  disabled={!showClaims}
+                  onClick={() => setShowPremiseLinks(!showPremiseLinks)}
+                >
+                  premise ({counts.premiseLinks})
+                </Button>
+                <Button
+                  size="sm"
+                  variant={!showClaims ? "ghost" : showClaimContradictsLinks ? "default" : "secondary"}
+                  disabled={!showClaims}
+                  onClick={() => setShowClaimContradictsLinks(!showClaimContradictsLinks)}
+                >
+                  contradicts ({counts.claimContradictsLinks})
+                </Button>
+              </div>
+            </div>
+
+            {/* Observations toggle with link types */}
+            <div className="flex flex-col gap-1">
+              <Button size="sm" variant={showObservations ? "default" : "secondary"} onClick={() => setShowObservations(!showObservations)}>
+                Observations ({counts.observations})
+              </Button>
+              <div className="flex gap-1">
+                <Button
+                  size="sm"
+                  variant={!showObservations ? "ghost" : showSupportsLinks ? "default" : "secondary"}
+                  disabled={!showObservations}
+                  onClick={() => setShowSupportsLinks(!showSupportsLinks)}
+                >
+                  supports ({counts.supportsLinks})
+                </Button>
+                <Button
+                  size="sm"
+                  variant={!showObservations ? "ghost" : showContradictsLinks ? "default" : "secondary"}
+                  disabled={!showObservations}
+                  onClick={() => setShowContradictsLinks(!showContradictsLinks)}
+                >
+                  contradicts ({counts.contradictsLinks})
+                </Button>
+                <Button
+                  size="sm"
+                  variant={!showObservations ? "ghost" : showContextualizesLinks ? "default" : "secondary"}
+                  disabled={!showObservations}
+                  onClick={() => setShowContextualizesLinks(!showContextualizesLinks)}
+                >
+                  contextualizes ({counts.contextualizesLinks})
+                </Button>
+              </div>
+            </div>
+
+            <Button size="sm" onClick={() => window.location.reload()}>
+              Reset Layout
+            </Button>
+          </div>
         </div>
       </ResizablePanel>
 
@@ -1025,33 +1190,8 @@ export const KnowledgeGraph: React.FC<KnowledgeGraphProps> = ({
       {/* Right Side Panel */}
       <ResizablePanel defaultSize={35} minSize={20}>
         <div className="h-full bg-white border-l border-gray-200 flex flex-col">
-          {/* Toggle Buttons for Node Types */}
-          <div className="p-4 border-b border-gray-200 flex gap-4">
-            <motion.button
-              onClick={() => setShowClaims(!showClaims)}
-              className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors
-                ${showClaims ? 'bg-orange-500 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
-              whileHover={{ scale: 1.02 }}
-              whileTap={{ scale: 0.98 }}
-            >
-              <span className={`w-2 h-2 rounded-full ${showClaims ? 'bg-white' : 'bg-orange-500'}`} />
-              Claims
-            </motion.button>
-
-            <motion.button
-              onClick={() => setShowObservations(!showObservations)}
-              className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors
-                ${showObservations ? 'bg-green-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
-              whileHover={{ scale: 1.02 }}
-              whileTap={{ scale: 0.98 }}
-            >
-              <span className={`w-2 h-2 rounded-full ${showObservations ? 'bg-white' : 'bg-green-600'}`} />
-              Observations
-            </motion.button>
-          </div>
-
           <div className="p-4 flex-1 flex flex-col overflow-hidden">
-            {/* Header - shows selected or hovered item */}
+            {/* Header - shows selected or hovered item
             <div
               className={`h-10 flex justify-between items-center w-full px-4 rounded-xl ${
                 (selectedNode || selectedLink) ? 'bg-blue-50 border border-blue-200' : 'bg-gray-50'
@@ -1062,16 +1202,18 @@ export const KnowledgeGraph: React.FC<KnowledgeGraphProps> = ({
               </h4>
               <div className="flex items-center gap-2 flex-shrink-0 ml-2">
                 {getPanelHeaderBadge()}
-                {(selectedNode || selectedLink) && (
-                  <button
-                    onClick={handleBackgroundClick}
-                    className="text-[10px] font-medium px-2 py-0.5 rounded text-blue-600 bg-blue-100 hover:bg-blue-200"
-                  >
-                    PINNED ✕
-                  </button>
-                )}
+                
               </div>
-            </div>
+            </div> */}
+
+            {(selectedNode || selectedLink) && (
+              <button
+                onClick={handleBackgroundClick}
+                className="text-[10px] font-medium px-2 py-0.5 rounded text-blue-600 bg-blue-100 hover:bg-blue-200"
+              >
+                PINNED ✕
+              </button>
+            )}
 
             {/* Panel Content */}
             <AnimatePresence mode="wait">
@@ -1083,7 +1225,7 @@ export const KnowledgeGraph: React.FC<KnowledgeGraphProps> = ({
                   exit={{ opacity: 0 }}
                   className="flex-1 mt-4 overflow-y-auto"
                 >
-                  <EdgeDetails link={panelLink} graphData={graphData} />
+                  <EdgeDetails link={panelLink} graphData={graphData} onViewSource={onViewSource} />
                 </motion.div>
               ) : panelNode ? (
                 <motion.div
@@ -1108,9 +1250,9 @@ export const KnowledgeGraph: React.FC<KnowledgeGraphProps> = ({
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
                   exit={{ opacity: 0 }}
-                  className="flex-1 mt-4 flex items-center justify-center text-gray-400 text-sm"
+                  className="flex-1 mt-4 flex items-center justify-center text-gray-600 text-center"
                 >
-                  Hover over a node or edge to see details
+                  Hover over a node or edge to see details. Click on it to pin them here.
                 </motion.div>
               )}
             </AnimatePresence>
