@@ -46,6 +46,7 @@ export interface ExtractLink {
     link_type: string;
     link_category: string;
     reasoning: string;
+    strength: number | null;
   };
   job_id: string | null;
   created_at: string | null;

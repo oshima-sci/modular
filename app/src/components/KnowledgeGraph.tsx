@@ -59,7 +59,14 @@ export interface Link {
   linkType: string;
   linkCategory: string;
   reasoning: string;
+  strength: number | null; // 0-1 for premise links, null otherwise
 }
+
+// Link distance constants
+const DEFAULT_LINK_DISTANCE = 60; // increased from d3-force default of 30
+const VARIANT_DISTANCE_MULTIPLIER = 0.05; // variants are very close (5% of default)
+const STRONG_PREMISE_DISTANCE_MULTIPLIER = 0.15; // strong premises (strength=1) are close but not as close as variants
+const WEAK_PREMISE_DISTANCE_MULTIPLIER = 1.5; // weak premises (strength=0) are 150% of default
 
 export interface GraphData {
   nodes: Node[];
@@ -83,6 +90,13 @@ interface EvidenceData {
   grouped: Map<string, Map<string, EvidenceItem[]>>;
   methodCount: number;
   methodPaperCount: number;
+  methodPaperIds: Set<string>;
+}
+
+// Variant item for claim details
+interface VariantItem {
+  node: Node;
+  reasoning: string;
 }
 
 // ============ NodeDetails Component ============
@@ -91,11 +105,16 @@ interface NodeDetailsProps {
   papersMap: Map<string, Paper>;
   methodsMap: Map<string, Method>;
   evidenceData: EvidenceData | null;
+  variantItems: VariantItem[];
+  isShowingEvidence: boolean;
+  allObservationsVisible: boolean;
   onPaperClick?: (paperId: string) => void;
   onViewSource?: (nodeId: string) => void;
+  onNodeSelect?: (node: Node) => void;
+  onToggleEvidence?: (claimId: string | null) => void;
 }
 
-const NodeDetails: React.FC<NodeDetailsProps> = ({ node, papersMap, methodsMap, evidenceData, onPaperClick, onViewSource }) => {
+const NodeDetails: React.FC<NodeDetailsProps> = ({ node, papersMap, methodsMap, evidenceData, variantItems, isShowingEvidence, allObservationsVisible, onPaperClick, onViewSource, onNodeSelect, onToggleEvidence }) => {
   return (
     <div className="flex flex-col gap-4">
       {/* Main node text */}
@@ -144,12 +163,46 @@ const NodeDetails: React.FC<NodeDetailsProps> = ({ node, papersMap, methodsMap, 
             );
           })}
         </div>
-        {node.sourceElementIds.length > 0 && (
-          <div className="mt-2 text-[10px] text-gray-400">
-            Elements: {node.sourceElementIds.join(', ')}
-          </div>
-        )}
       </div>
+
+      {/* Variant Claims */}
+      {variantItems.length > 0 && (
+        <Accordion type="single" collapsible className="w-full">
+          <AccordionItem value="variants" className="border-0">
+            <AccordionTrigger className="text-[10px] uppercase tracking-widest font-bold text-gray-500 hover:no-underline py-0 [&>svg]:size-3 justify-start">
+              Variant Claims ({variantItems.length})
+            </AccordionTrigger>
+            <AccordionContent className="pt-2">
+              <Accordion type="multiple" className="flex flex-col gap-2">
+                {variantItems.map((item) => (
+                  <AccordionItem
+                    key={item.node.id}
+                    value={item.node.id}
+                    className="border-0"
+                  >
+                    {/* Variant card */}
+                    <button
+                      onClick={() => onNodeSelect?.(item.node)}
+                      className="w-full text-left p-2 text-xs rounded-lg leading-relaxed bg-purple-50 text-purple-900 border border-purple-200 hover:bg-purple-100 transition-colors cursor-pointer"
+                    >
+                      {item.node.displayText}
+                    </button>
+                    {/* Reasoning accordion trigger */}
+                    <div className="flex items-center gap-2 py-1 px-1">
+                      <AccordionTrigger className="text-[10px] text-gray-500 hover:text-gray-700 hover:no-underline [&>svg]:size-3 py-0">
+                        Reasoning
+                      </AccordionTrigger>
+                    </div>
+                    <AccordionContent className="px-1 pb-2 pt-0 text-[11px] text-gray-600">
+                      {item.reasoning}
+                    </AccordionContent>
+                  </AccordionItem>
+                ))}
+              </Accordion>
+            </AccordionContent>
+          </AccordionItem>
+        </Accordion>
+      )}
 
       {/* For Claims: Evidence Landscape */}
       {node.type === 'claim' && evidenceData && (
@@ -207,12 +260,26 @@ const NodeDetails: React.FC<NodeDetailsProps> = ({ node, papersMap, methodsMap, 
               )}
             </div>
             {evidenceData.methodCount > 0 && (
-              <div className="mt-2 text-xs text-gray-500">
+              <p className="mt-2 text-xs text-gray-500">
                 from {evidenceData.methodCount} {evidenceData.methodCount === 1 ? 'method' : 'methods'}
-                {evidenceData.methodPaperCount > 0 && (
-                  <> across {evidenceData.methodPaperCount} {evidenceData.methodPaperCount === 1 ? 'paper' : 'papers'}</>
-                )}
-              </div>
+                {evidenceData.methodPaperCount > 1 ? (
+                  <> <span className="font-semibold text-gray-800">across {evidenceData.methodPaperCount} papers</span></>
+                ) : evidenceData.methodPaperCount === 1 &&
+                    node.paperIds.length === 1 &&
+                    evidenceData.methodPaperIds.has(node.paperIds[0]) ? (
+                  <> from the <span className="font-semibold">same paper as the claim</span></>
+                ) : null}
+              </p>
+            )}
+            {evidenceData.counts.total > 0 && !allObservationsVisible && (
+              <Button
+                size="sm"
+                variant={isShowingEvidence ? "default" : "secondary"}
+                className="mt-2"
+                onClick={() => onToggleEvidence?.(isShowingEvidence ? null : node.id)}
+              >
+                {isShowingEvidence ? "Hide Evidence Landscape" : "Show Evidence Landscape for Claim"}
+              </Button>
             )}
           </div>
 
@@ -470,6 +537,7 @@ export const KnowledgeGraph: React.FC<KnowledgeGraphProps> = ({
   const [graphData, setGraphData] = useState<GraphData | null>(null);
   const [showClaims, setShowClaims] = useState<boolean>(true);
   const [showObservations, setShowObservations] = useState<boolean>(false);
+  const [showEvidenceForClaimId, setShowEvidenceForClaimId] = useState<string | null>(null);
 
   // Link type visibility - claim-to-claim links
   const [showPremiseLinks, setShowPremiseLinks] = useState<boolean>(true);
@@ -479,6 +547,8 @@ export const KnowledgeGraph: React.FC<KnowledgeGraphProps> = ({
   const [showSupportsLinks, setShowSupportsLinks] = useState<boolean>(true);
   const [showContradictsLinks, setShowContradictsLinks] = useState<boolean>(true);
   const [showContextualizesLinks, setShowContextualizesLinks] = useState<boolean>(true);
+  // Highlight mode
+  const [highlightContradictions, setHighlightContradictions] = useState<boolean>(false);
 
   // Track container size for ForceGraph2D
   useEffect(() => {
@@ -647,6 +717,7 @@ export const KnowledgeGraph: React.FC<KnowledgeGraphProps> = ({
         linkType: link.content.link_type,
         linkCategory: link.content.link_category,
         reasoning: link.content.reasoning,
+        strength: link.content.strength ?? null,
       }))
       .filter((link) => {
         const src = link.source as string;
@@ -751,6 +822,39 @@ export const KnowledgeGraph: React.FC<KnowledgeGraphProps> = ({
     };
   }, [graphData]);
 
+  // Compute observation IDs linked to a specific claim (for "show evidence" feature)
+  const evidenceObservationIds = useMemo(() => {
+    if (!graphData || !showEvidenceForClaimId) return new Set<string>();
+
+    const obsIds = new Set<string>();
+    graphData.links.forEach((link) => {
+      if (link.linkCategory !== "claim_to_observation") return;
+      const src = typeof link.source === "object" ? link.source.id : link.source;
+      const tgt = typeof link.target === "object" ? link.target.id : link.target;
+
+      if (src === showEvidenceForClaimId) obsIds.add(tgt);
+      else if (tgt === showEvidenceForClaimId) obsIds.add(src);
+    });
+    return obsIds;
+  }, [graphData, showEvidenceForClaimId]);
+
+  // Compute node IDs involved in contradiction links (for highlight mode)
+  // Must be computed before filteredGraphData so we can include these nodes
+  const contradictionNodeIds = useMemo(() => {
+    const nodeIds = new Set<string>();
+    if (!graphData) return nodeIds;
+
+    graphData.links.forEach((link) => {
+      if (link.linkType === "contradiction") {
+        const src = typeof link.source === "object" ? link.source.id : link.source;
+        const tgt = typeof link.target === "object" ? link.target.id : link.target;
+        nodeIds.add(src);
+        nodeIds.add(tgt);
+      }
+    });
+    return nodeIds;
+  }, [graphData]);
+
   // Filter nodes based on visibility toggles
   const filteredGraphData: GraphData | null = useMemo(() => {
     if (!graphData) return null;
@@ -766,9 +870,18 @@ export const KnowledgeGraph: React.FC<KnowledgeGraphProps> = ({
 
     const filteredNodes = graphData.nodes.filter((node) => {
       if (node.type === "claim" && !showClaims) return false;
-      if (node.type === "observation" && !showObservations) return false;
-      // Filter out observation nodes with no links
-      if (node.type === "observation" && !nodesWithLinks.has(node.id)) return false;
+      if (node.type === "observation") {
+        // If highlighting contradictions, show observations involved in contradictions
+        if (highlightContradictions && contradictionNodeIds.has(node.id)) {
+          return true;
+        }
+        // If showing evidence for a specific claim, only show those observations
+        if (showEvidenceForClaimId) {
+          return evidenceObservationIds.has(node.id);
+        }
+        // Otherwise use global toggle
+        if (!showObservations) return false;
+      }
       return true;
     });
 
@@ -783,7 +896,7 @@ export const KnowledgeGraph: React.FC<KnowledgeGraphProps> = ({
     });
 
     return { nodes: filteredNodes, links: filteredLinks };
-  }, [graphData, showClaims, showObservations]);
+  }, [graphData, showClaims, showObservations, showEvidenceForClaimId, evidenceObservationIds, highlightContradictions, contradictionNodeIds]);
 
 
   // Compute neighbor IDs of the selected node (using the filtered data).
@@ -900,8 +1013,34 @@ export const KnowledgeGraph: React.FC<KnowledgeGraphProps> = ({
       }
     });
 
-    return { counts, grouped, methodCount, methodPaperCount };
+    return { counts, grouped, methodCount, methodPaperCount, methodPaperIds: uniqueMethodPapers };
   }, [graphData, panelNode, methodsMap]);
+
+  // Compute variant items for the panel node (includes reasoning)
+  const variantItems = useMemo((): { node: Node; reasoning: string }[] => {
+    if (!graphData || !panelNode) return [];
+
+    const variants: { node: Node; reasoning: string }[] = [];
+    graphData.links.forEach((link) => {
+      if (link.linkType !== "variant") return;
+
+      const src = typeof link.source === "object" ? link.source.id : link.source;
+      const tgt = typeof link.target === "object" ? link.target.id : link.target;
+
+      let variantId: string | null = null;
+      if (src === panelNode.id) variantId = tgt;
+      else if (tgt === panelNode.id) variantId = src;
+
+      if (variantId) {
+        const variantNode = graphData.nodes.find((n) => n.id === variantId);
+        if (variantNode) {
+          variants.push({ node: variantNode, reasoning: link.reasoning });
+        }
+      }
+    });
+
+    return variants;
+  }, [graphData, panelNode]);
 
   // Force a refresh when the selected node or its neighbors change, so that node objects are updated
   useEffect(() => {
@@ -913,30 +1052,60 @@ export const KnowledgeGraph: React.FC<KnowledgeGraphProps> = ({
     (fgRef.current as any)?.refresh?.();
   }, [hoveredNode, hoveredLink]);
 
-  // Configure link distances: variant links at 10% of default (30)
+  // Configure link distances based on link type and strength
   useEffect(() => {
     if (fgRef.current) {
-      const DEFAULT_DISTANCE = 30; // d3-force default
       fgRef.current.d3Force('link')?.distance((link: any) => {
-        return link.linkType === 'variant' ? DEFAULT_DISTANCE * 0.05 : DEFAULT_DISTANCE;
+        // Variants are very close together
+        if (link.linkType === 'variant') {
+          return DEFAULT_LINK_DISTANCE * VARIANT_DISTANCE_MULTIPLIER;
+        }
+
+        // Premise links: distance based on strength (strong = close, weak = far)
+        if (link.linkType === 'premise' && link.linkCategory === 'claim_to_claim') {
+          const strength = link.strength;
+          if (strength !== null && strength !== undefined) {
+            // Interpolate: strength=1 -> STRONG multiplier, strength=0 -> WEAK multiplier
+            const multiplier = STRONG_PREMISE_DISTANCE_MULTIPLIER +
+              (1 - strength) * (WEAK_PREMISE_DISTANCE_MULTIPLIER - STRONG_PREMISE_DISTANCE_MULTIPLIER);
+            return DEFAULT_LINK_DISTANCE * multiplier;
+          }
+        }
+
+        return DEFAULT_LINK_DISTANCE;
       });
     }
   }, [filteredGraphData]);
 
   // Clear link selection when node is selected
   const handleNodeClick = (node: any) => {
-    onNodeSelect(node as Node);
+    const n = node as Node;
+    // In highlight contradictions mode, only allow clicking contradiction nodes
+    if (highlightContradictions && !contradictionNodeIds.has(n.id)) {
+      return;
+    }
+    onNodeSelect(n);
     onLinkSelect(null);
+    // Reset evidence landscape if selecting a different node
+    if (showEvidenceForClaimId && showEvidenceForClaimId !== n.id) {
+      setShowEvidenceForClaimId(null);
+    }
   };
 
   // Clear node selection when link is selected
   const handleLinkClick = (link: any) => {
-    onLinkSelect(link as Link);
+    const l = link as Link;
+    // In highlight contradictions mode, only allow clicking contradiction links
+    if (highlightContradictions && l.linkType !== "contradiction") {
+      return;
+    }
+    onLinkSelect(l);
     onNodeSelect(null);
   };
 
   const handleBackgroundClick = () => {
     onClearSelection();
+    setShowEvidenceForClaimId(null); // Reset evidence landscape
   };
 
   return (
@@ -975,13 +1144,29 @@ export const KnowledgeGraph: React.FC<KnowledgeGraphProps> = ({
                   return "#ddd";
                 }
 
-                if (selectedNode) {
-                  if (src === selectedNode.id || tgt === selectedNode.id) return "#f00";
-                  return "#ddd";
+                // Helper to get default link color
+                const getDefaultLinkColor = () => {
+                  if (link.linkType === "contradiction") return "#ef4444"; // red
+                  if (link.linkType === "supports") return "#22c55e"; // green
+                  return "#aaa"; // gray for premise, variant, contextualizes, etc.
+                };
+
+                // Highlight contradictions mode
+                if (highlightContradictions) {
+                  if (link.linkType === "contradiction") return "#ef4444"; // red
+                  return "transparent"; // Hide non-contradiction links
                 }
-                if (link.type === "relationship") return "#1f77b4";
-                if (link.type === "references") return "#ff7f0e";
-                return "#aaa";
+
+                if (selectedNode) {
+                  if (src === selectedNode.id || tgt === selectedNode.id) {
+                    // Claim-to-claim edges connected to selected node are orange
+                    if (link.linkCategory === "claim_to_claim") return "#f97316"; // orange
+                    return getDefaultLinkColor();
+                  }
+                  return "transparent"; // Hide unrelated links
+                }
+
+                return getDefaultLinkColor();
               }}
               linkWidth={(link: any) => {
                 const src = typeof link.source === "object" ? link.source.id : link.source;
@@ -993,29 +1178,49 @@ export const KnowledgeGraph: React.FC<KnowledgeGraphProps> = ({
                   const activeTgt = typeof activeLink!.target === "object" ? activeLink!.target.id : activeLink!.target;
                   if (src === activeSrc && tgt === activeTgt) return 3;
                 }
+
+                // Thicker contradiction edges in highlight mode
+                if (highlightContradictions && link.linkType === "contradiction") {
+                  return 2.5;
+                }
+
+                // Thicker edges when showing evidence for a specific claim
+                if (showEvidenceForClaimId && link.linkCategory === "claim_to_observation") {
+                  if (src === showEvidenceForClaimId || tgt === showEvidenceForClaimId) return 2.5;
+                }
+
+                // Thicker claim-to-claim edges when a node is selected
+                if (selectedNode && link.linkCategory === "claim_to_claim") {
+                  if (src === selectedNode.id || tgt === selectedNode.id) return 2.5;
+                }
+
                 return 1;
               }}
               nodeLabel={selectedNode ? (node: any) => getNodeLabelText(node as Node) : ""}
               onNodeClick={handleNodeClick}
               onNodeHover={(node: any) => {
-                onNodeHover(node as Node || null);
-                if (node) onLinkHover(null); // Clear link hover when hovering node
+                const n = node as Node | null;
+                // In highlight contradictions mode, only allow hovering contradiction nodes
+                if (highlightContradictions && n && !contradictionNodeIds.has(n.id)) {
+                  return;
+                }
+                onNodeHover(n);
+                if (n) onLinkHover(null); // Clear link hover when hovering node
               }}
               onLinkClick={handleLinkClick}
               onLinkHover={(link: any) => {
-                onLinkHover(link as Link || null);
-                if (link) onNodeHover(null); // Clear node hover when hovering link
+                const l = link as Link | null;
+                // In highlight contradictions mode, only allow hovering contradiction links
+                if (highlightContradictions && l && l.linkType !== "contradiction") {
+                  return;
+                }
+                onLinkHover(l);
+                if (l) onNodeHover(null); // Clear node hover when hovering link
               }}
               onBackgroundClick={handleBackgroundClick}
               nodeColor={(node: any) => {
-                const n = node as Node;
-                if (selectedNode) {
-                  if (n.id === selectedNode.id || neighborNodeIds.has(n.id)) {
-                    return getNodeColor(n);
-                  }
-                  return "#ddd";
-                }
-                return getNodeColor(n);
+                // Note: actual rendering uses nodeCanvasObject with opacity
+                return getNodeColor(node as Node);
               }}
               nodeVal={(node: any) => {
                 const n = node as Node;
@@ -1034,11 +1239,17 @@ export const KnowledgeGraph: React.FC<KnowledgeGraphProps> = ({
                 const n = node as Node;
                 const nodeSize = selectedNode && n.id === selectedNode.id ? 9 : 6;
 
-                // Determine node color based on selection state
-                let color = getNodeColor(n);
-                if (selectedNode && n.id !== selectedNode.id && !neighborNodeIds.has(n.id)) {
-                  color = "#ddd";
+                // Determine if node is "related" based on current mode
+                let isRelated = true;
+                if (highlightContradictions) {
+                  isRelated = contradictionNodeIds.has(n.id);
+                } else if (selectedNode) {
+                  isRelated = n.id === selectedNode.id || neighborNodeIds.has(n.id);
                 }
+
+                // Unrelated nodes: #ddd at 50% opacity
+                ctx.globalAlpha = isRelated ? 1 : 0.5;
+                const color = isRelated ? getNodeColor(n) : "#ddd";
 
                 // Draw main node circle
                 ctx.beginPath();
@@ -1079,6 +1290,9 @@ export const KnowledgeGraph: React.FC<KnowledgeGraphProps> = ({
                     ctx.fillText(label, badgeX + paddingX, node.y + offsetY);
                   }
                 }
+
+                // Reset opacity
+                ctx.globalAlpha = 1;
               }}
               nodePointerAreaPaint={(node: any, color, ctx) => {
                 const n = node as Node;
@@ -1148,7 +1362,7 @@ export const KnowledgeGraph: React.FC<KnowledgeGraphProps> = ({
             {/* Observations toggle with link types */}
             <div className="flex flex-col gap-1">
               <Button size="sm" variant={showObservations ? "default" : "secondary"} onClick={() => setShowObservations(!showObservations)}>
-                Observations ({counts.observations})
+                Evidence ({counts.observations})
               </Button>
               <div className="flex gap-1">
                 <Button
@@ -1177,6 +1391,14 @@ export const KnowledgeGraph: React.FC<KnowledgeGraphProps> = ({
                 </Button>
               </div>
             </div>
+
+            <Button
+              size="sm"
+              variant={highlightContradictions ? "default" : "secondary"}
+              onClick={() => setHighlightContradictions(!highlightContradictions)}
+            >
+              Highlight Contradictions
+            </Button>
 
             <Button size="sm" onClick={() => window.location.reload()}>
               Reset Layout
@@ -1240,8 +1462,13 @@ export const KnowledgeGraph: React.FC<KnowledgeGraphProps> = ({
                     papersMap={papersMap}
                     methodsMap={methodsMap}
                     evidenceData={evidenceData}
+                    variantItems={variantItems}
+                    isShowingEvidence={showEvidenceForClaimId === panelNode.id}
+                    allObservationsVisible={showObservations}
                     onPaperClick={onPaperClick}
                     onViewSource={onViewSource}
+                    onNodeSelect={onNodeSelect}
+                    onToggleEvidence={setShowEvidenceForClaimId}
                   />
                 </motion.div>
               ) : (

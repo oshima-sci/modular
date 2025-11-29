@@ -1,23 +1,33 @@
 import { useCallback, useState } from "react";
-import { useNavigate } from "react-router-dom";
 import { useDropzone } from "react-dropzone";
+import { useQueryClient } from "@tanstack/react-query";
 import { useUploadPapers } from "@/hooks/useUploadPapers";
 import { useCreateLibrary } from "@/hooks/useCreateLibrary";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Upload, X, Loader2, ArrowLeft } from "lucide-react";
+import { Upload, X, Loader2 } from "lucide-react";
 
-type Stage = "upload" | "create-library";
+type PaperUploaderProps =
+  | {
+      mode: "create-library";
+      onSuccess: (libraryId: string) => void;
+    }
+  | {
+      mode: "add-to-library";
+      libraryId: string;
+      onSuccess?: () => void;
+    };
 
-export default function PaperUploader() {
-  const navigate = useNavigate();
+export default function PaperUploader(props: PaperUploaderProps) {
+  const queryClient = useQueryClient();
   const uploadMutation = useUploadPapers();
   const createLibraryMutation = useCreateLibrary();
 
-  const [stage, setStage] = useState<Stage>("upload");
   const [stagedFiles, setStagedFiles] = useState<File[]>([]);
-  const [uploadedPaperIds, setUploadedPaperIds] = useState<string[]>([]);
   const [libraryName, setLibraryName] = useState("");
+
+  const isCreating = props.mode === "create-library";
+  const isPending = uploadMutation.isPending || createLibraryMutation.isPending;
 
   const onDrop = useCallback((acceptedFiles: File[]) => {
     setStagedFiles((prev) => [...prev, ...acceptedFiles]);
@@ -27,8 +37,10 @@ export default function PaperUploader() {
     setStagedFiles((prev) => prev.filter((_, i) => i !== index));
   };
 
-  const handleUpload = () => {
+  const handleSubmit = () => {
     if (stagedFiles.length === 0) return;
+    if (isCreating && !libraryName.trim()) return;
+
     uploadMutation.mutate(stagedFiles, {
       onSuccess: (data) => {
         // Extract paper IDs from successful uploads (including duplicates)
@@ -37,33 +49,42 @@ export default function PaperUploader() {
           .map((result) => result.duplicate_of || result.paper?.id)
           .filter((id): id is string => id !== null && id !== undefined);
 
-        setUploadedPaperIds(paperIds);
-        setStagedFiles([]);
-        setStage("create-library");
+        if (paperIds.length === 0) return;
+
+        if (props.mode === "create-library") {
+          createLibraryMutation.mutate(
+            {
+              paper_ids: paperIds,
+              library_name: libraryName.trim(),
+            },
+            {
+              onSuccess: (data) => {
+                setStagedFiles([]);
+                setLibraryName("");
+                props.onSuccess(data.library.id);
+              },
+            }
+          );
+        } else {
+          createLibraryMutation.mutate(
+            {
+              paper_ids: paperIds,
+              library_id: props.libraryId,
+            },
+            {
+              onSuccess: () => {
+                setStagedFiles([]);
+                // Invalidate library query to refetch
+                queryClient.invalidateQueries({
+                  queryKey: ["library", props.libraryId],
+                });
+                props.onSuccess?.();
+              },
+            }
+          );
+        }
       },
     });
-  };
-
-  const handleCreateLibrary = () => {
-    if (!libraryName.trim() || uploadedPaperIds.length === 0) return;
-    createLibraryMutation.mutate(
-      {
-        paper_ids: uploadedPaperIds,
-        library_name: libraryName.trim(),
-      },
-      {
-        onSuccess: (data) => {
-          navigate(`/library/${data.library.id}`);
-        },
-      }
-    );
-  };
-
-  const handleBack = () => {
-    setStage("upload");
-    setUploadedPaperIds([]);
-    setLibraryName("");
-    uploadMutation.reset();
   };
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
@@ -73,53 +94,11 @@ export default function PaperUploader() {
     },
   });
 
-  if (stage === "create-library") {
-    return (
-      <div className="flex flex-col gap-4">
-        <button
-          onClick={handleBack}
-          className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground w-fit"
-        >
-          <ArrowLeft className="h-4 w-4" />
-          Back
-        </button>
+  const buttonDisabled =
+    isPending || stagedFiles.length === 0 || (isCreating && !libraryName.trim());
 
-        <div className="text-sm text-muted-foreground">
-          {uploadedPaperIds.length} paper{uploadedPaperIds.length !== 1 ? "s" : ""} ready
-        </div>
-
-        <div className="space-y-2">
-          <Input
-            placeholder="Library name"
-            value={libraryName}
-            onChange={(e) => setLibraryName(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") handleCreateLibrary();
-            }}
-          />
-          <Button
-            onClick={handleCreateLibrary}
-            disabled={!libraryName.trim() || createLibraryMutation.isPending}
-            className="w-full"
-          >
-            {createLibraryMutation.isPending ? (
-              <>
-                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                Creating...
-              </>
-            ) : (
-              "Create Library"
-            )}
-          </Button>
-          {createLibraryMutation.isError && (
-            <p className="text-sm text-red-500">
-              Failed to create library: {createLibraryMutation.error.message}
-            </p>
-          )}
-        </div>
-      </div>
-    );
-  }
+  const buttonText = isCreating ? "Create Library" : "Add Papers";
+  const pendingText = isCreating ? "Creating..." : "Adding...";
 
   return (
     <div className="flex flex-col gap-2">
@@ -143,24 +122,36 @@ export default function PaperUploader() {
       </div>
 
       {stagedFiles.length > 0 && (
-        <div className="mt-4 space-y-2">
+        <div className="mt-4 space-y-3">
+
+          <h2 className="font-semibold">Name your new library</h2>
+
+          {isCreating && (
+            <Input
+              placeholder="Library name"
+              value={libraryName}
+              onChange={(e) => setLibraryName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !buttonDisabled) handleSubmit();
+              }}
+            />
+          )}
+
+          <Button onClick={handleSubmit} disabled={buttonDisabled} className="w-full">
+            {isPending ? (
+              <>
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                {pendingText}
+              </>
+            ) : (
+              buttonText
+            )}
+          </Button>
+
           <div className="text-sm font-medium">
             {stagedFiles.length} file{stagedFiles.length > 1 ? "s" : ""} staged
           </div>
-          <Button
-            onClick={handleUpload}
-            disabled={uploadMutation.isPending}
-            className="w-full mb-4"
-          >
-            {uploadMutation.isPending ? (
-              <>
-                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                Uploading...
-              </>
-            ) : (
-              `Upload ${stagedFiles.length} file${stagedFiles.length > 1 ? "s" : ""}`
-            )}
-          </Button>
+
           <div className="space-y-1">
             {stagedFiles.map((file, index) => (
               <div
@@ -177,9 +168,12 @@ export default function PaperUploader() {
               </div>
             ))}
           </div>
-          {uploadMutation.isError && (
+
+          {(uploadMutation.isError || createLibraryMutation.isError) && (
             <p className="text-sm text-red-500">
-              Upload failed: {uploadMutation.error.message}
+              {uploadMutation.isError
+                ? `Upload failed: ${uploadMutation.error.message}`
+                : `Failed to ${isCreating ? "create library" : "add papers"}: ${createLibraryMutation.error?.message}`}
             </p>
           )}
         </div>

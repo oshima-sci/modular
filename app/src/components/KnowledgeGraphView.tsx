@@ -7,8 +7,18 @@ import {
   ResizablePanel,
   ResizableHandle,
 } from "@/components/ui/resizable";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import { Plus } from "lucide-react";
 import { KnowledgeGraph } from "./KnowledgeGraph";
 import PdfViewer, { type BBox } from "@/components/PdfViewer";
+import PaperUploader from "./PaperUploader";
 import { Link } from "react-router-dom";
 
 // Supabase storage URL for public bucket access
@@ -117,6 +127,9 @@ export const KnowledgeGraphView: React.FC = () => {
   const { libraryId } = useParams<{ libraryId: string }>();
   const { data: library } = useLibrary(libraryId);
 
+  // Add papers dialog state
+  const [addPapersOpen, setAddPapersOpen] = useState(false);
+
   // PDF viewer state
   const [pdfPanelOpen, setPdfPanelOpen] = useState(false);
   const [currentPaperId, setCurrentPaperId] = useState<string | null>(null);
@@ -210,6 +223,26 @@ export const KnowledgeGraphView: React.FC = () => {
         <Link to={`/`}>
           <div className="uppercase p-2 text-black font-semibold">Modular</div>
         </Link>
+        <Dialog open={addPapersOpen} onOpenChange={setAddPapersOpen}>
+          <DialogTrigger asChild>
+            <Button variant="outline" size="sm">
+              <Plus className="h-4 w-4 mr-1" />
+              Add Papers
+            </Button>
+          </DialogTrigger>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Add papers to library</DialogTitle>
+            </DialogHeader>
+            {libraryId && (
+              <PaperUploader
+                mode="add-to-library"
+                libraryId={libraryId}
+                onSuccess={() => setAddPapersOpen(false)}
+              />
+            )}
+          </DialogContent>
+        </Dialog>
         {processing && processing.papers_processing > 0 && (
           <div className="flex items-center gap-2 px-3 py-1.5 bg-blue-50 border border-blue-200 rounded-full text-sm text-blue-700">
             <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none">

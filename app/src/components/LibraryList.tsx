@@ -1,4 +1,4 @@
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { useLibraries } from "@/hooks/useLibraries";
 import { Card, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -6,6 +6,7 @@ import { ArrowRight } from "lucide-react";
 import PaperUploader from "./PaperUploader";
 
 export default function LibraryList() {
+  const navigate = useNavigate();
   const { data: libraries, isLoading, error } = useLibraries();
 
   if (isLoading) return <div className="p-8">Loading...</div>;
@@ -17,7 +18,10 @@ export default function LibraryList() {
       <div className="max-w-2xl mx-auto p-8 space-y-16 h-full overflow-y-auto pb-64">
         <div className="flex flex-col gap-2">
           <h3>Create a Modular library by uploading papers</h3>
-          <PaperUploader />
+          <PaperUploader
+            mode="create-library"
+            onSuccess={(libraryId) => navigate(`/library/${libraryId}`)}
+          />
         </div>
         <div className="flex flex-col gap-2">
           <h3>Or view Modular libraries made by the community</h3>
