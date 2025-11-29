@@ -71,6 +71,11 @@ class ExtractQueries:
         )
         return result.data
 
+    def has_extracts(self, paper_id: str | UUID) -> bool:
+        """Check if any extracts exist for a paper."""
+        result = self.db.table("extracts").select("id").eq("paper_id", str(paper_id)).limit(1).execute()
+        return bool(result.data)
+
     def get_by_paper(
         self,
         paper_id: str | UUID,

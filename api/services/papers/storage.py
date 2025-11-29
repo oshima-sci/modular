@@ -1,7 +1,7 @@
 import hashlib
 from uuid import UUID, uuid4
 
-from db import get_supabase_client
+from db import get_supabase_client, ExtractQueries
 from models import Paper, PaperUploadResult, JobType
 from services.jobs import JobQueue
 
@@ -41,6 +41,15 @@ class PaperStorage:
         # Check for duplicate
         existing = self._find_by_sha256(sha256)
         if existing:
+            # If duplicate has no extracts, queue extraction job
+            extracts_db = ExtractQueries()
+            if not extracts_db.has_extracts(existing.id):
+                job_queue = JobQueue()
+                job_queue.create_job_by_type(
+                    job_type=JobType.EXTRACT_ELEMENTS,
+                    payload={"paper_id": str(existing.id)}
+                )
+
             return PaperUploadResult(
                 filename=filename,
                 success=True,
