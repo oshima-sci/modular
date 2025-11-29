@@ -726,11 +726,12 @@ export const KnowledgeGraph: React.FC<KnowledgeGraphProps> = ({
         return src !== tgt && mergedNodeIds.has(src) && mergedNodeIds.has(tgt);
       });
 
-    // Deduplicate links (same source-target pair)
+    // Deduplicate links (same source-target pair AND same link type)
+    // We need to preserve different link types between the same nodes
     const linkKey = (l: Link) => {
       const src = typeof l.source === "string" ? l.source : l.source.id;
       const tgt = typeof l.target === "string" ? l.target : l.target.id;
-      return `${src}->${tgt}`;
+      return `${src}->${tgt}:${l.linkType}`;
     };
     const seenLinks = new Set<string>();
     const dedupedLinks: Link[] = [];
@@ -738,7 +739,7 @@ export const KnowledgeGraph: React.FC<KnowledgeGraphProps> = ({
       const key = linkKey(link);
       const src = typeof link.source === "string" ? link.source : link.source.id;
       const tgt = typeof link.target === "string" ? link.target : link.target.id;
-      const reverseKey = `${tgt}->${src}`;
+      const reverseKey = `${tgt}->${src}:${link.linkType}`;
       if (!seenLinks.has(key) && !seenLinks.has(reverseKey)) {
         seenLinks.add(key);
         dedupedLinks.push(link);
@@ -805,7 +806,7 @@ export const KnowledgeGraph: React.FC<KnowledgeGraphProps> = ({
         else if (link.linkType === "contradiction") claimContradictsLinks++;
       } else if (link.linkCategory === "claim_to_observation") {
         if (link.linkType === "supports") supportsLinks++;
-        else if (link.linkType === "contradiction") contradictsLinks++;
+        else if (link.linkType === "contradicts") contradictsLinks++;
         else if (link.linkType === "contextualizes") contextualizesLinks++;
       }
     });
@@ -840,12 +841,13 @@ export const KnowledgeGraph: React.FC<KnowledgeGraphProps> = ({
 
   // Compute node IDs involved in contradiction links (for highlight mode)
   // Must be computed before filteredGraphData so we can include these nodes
+  // Includes both claim_to_claim "contradiction" and claim_to_observation "contradicts"
   const contradictionNodeIds = useMemo(() => {
     const nodeIds = new Set<string>();
     if (!graphData) return nodeIds;
 
     graphData.links.forEach((link) => {
-      if (link.linkType === "contradiction") {
+      if (link.linkType === "contradiction" || link.linkType === "contradicts") {
         const src = typeof link.source === "object" ? link.source.id : link.source;
         const tgt = typeof link.target === "object" ? link.target.id : link.target;
         nodeIds.add(src);
@@ -1096,7 +1098,7 @@ export const KnowledgeGraph: React.FC<KnowledgeGraphProps> = ({
   const handleLinkClick = (link: any) => {
     const l = link as Link;
     // In highlight contradictions mode, only allow clicking contradiction links
-    if (highlightContradictions && l.linkType !== "contradiction") {
+    if (highlightContradictions && l.linkType !== "contradiction" && l.linkType !== "contradicts") {
       return;
     }
     onLinkSelect(l);
@@ -1128,33 +1130,45 @@ export const KnowledgeGraph: React.FC<KnowledgeGraphProps> = ({
                   if (link.linkType === "contradiction" && !showClaimContradictsLinks) return "transparent";
                 } else if (link.linkCategory === "claim_to_observation") {
                   if (link.linkType === "supports" && !showSupportsLinks) return "transparent";
-                  if (link.linkType === "contradiction" && !showContradictsLinks) return "transparent";
+                  if (link.linkType === "contradicts" && !showContradictsLinks) return "transparent";
                   if (link.linkType === "contextualizes" && !showContextualizesLinks) return "transparent";
                 }
 
                 const src = typeof link.source === "object" ? link.source.id : link.source;
                 const tgt = typeof link.target === "object" ? link.target.id : link.target;
 
-                // Highlight selected/hovered link
+                // Helper to check if this is a contradiction link
+                const isContradictionLink = link.linkType === "contradiction" || link.linkType === "contradicts";
+
+                // Helper to get default link color
+                const getDefaultLinkColor = () => {
+                  if (isContradictionLink) return "#ef4444"; // red
+                  if (link.linkType === "supports") return "#22c55e"; // green
+                  return "#aaa"; // gray for premise, variant, contextualizes, etc.
+                };
+
+                // Highlight contradictions mode - takes priority
+                if (highlightContradictions) {
+                  // Non-contradiction links are always transparent in this mode
+                  if (!isContradictionLink) return "transparent";
+
+                  // For contradiction links, check if one is selected/hovered
+                  if (selectedLink || hoveredLink) {
+                    const activeLink = selectedLink || hoveredLink;
+                    const activeSrc = typeof activeLink!.source === "object" ? activeLink!.source.id : activeLink!.source;
+                    const activeTgt = typeof activeLink!.target === "object" ? activeLink!.target.id : activeLink!.target;
+                    if (src === activeSrc && tgt === activeTgt) return "#3b82f6"; // blue for active
+                  }
+                  return "#ef4444"; // red for other contradiction links
+                }
+
+                // Normal mode: Highlight selected/hovered link
                 if (selectedLink || hoveredLink) {
                   const activeLink = selectedLink || hoveredLink;
                   const activeSrc = typeof activeLink!.source === "object" ? activeLink!.source.id : activeLink!.source;
                   const activeTgt = typeof activeLink!.target === "object" ? activeLink!.target.id : activeLink!.target;
                   if (src === activeSrc && tgt === activeTgt) return "#3b82f6"; // blue
                   return "#ddd";
-                }
-
-                // Helper to get default link color
-                const getDefaultLinkColor = () => {
-                  if (link.linkType === "contradiction") return "#ef4444"; // red
-                  if (link.linkType === "supports") return "#22c55e"; // green
-                  return "#aaa"; // gray for premise, variant, contextualizes, etc.
-                };
-
-                // Highlight contradictions mode
-                if (highlightContradictions) {
-                  if (link.linkType === "contradiction") return "#ef4444"; // red
-                  return "transparent"; // Hide non-contradiction links
                 }
 
                 if (selectedNode) {
@@ -1180,7 +1194,7 @@ export const KnowledgeGraph: React.FC<KnowledgeGraphProps> = ({
                 }
 
                 // Thicker contradiction edges in highlight mode
-                if (highlightContradictions && link.linkType === "contradiction") {
+                if (highlightContradictions && (link.linkType === "contradiction" || link.linkType === "contradicts")) {
                   return 2.5;
                 }
 
@@ -1211,7 +1225,7 @@ export const KnowledgeGraph: React.FC<KnowledgeGraphProps> = ({
               onLinkHover={(link: any) => {
                 const l = link as Link | null;
                 // In highlight contradictions mode, only allow hovering contradiction links
-                if (highlightContradictions && l && l.linkType !== "contradiction") {
+                if (highlightContradictions && l && l.linkType !== "contradiction" && l.linkType !== "contradicts") {
                   return;
                 }
                 onLinkHover(l);
@@ -1310,7 +1324,7 @@ export const KnowledgeGraph: React.FC<KnowledgeGraphProps> = ({
                   if (link.linkType === "contradiction" && !showClaimContradictsLinks) return;
                 } else if (link.linkCategory === "claim_to_observation") {
                   if (link.linkType === "supports" && !showSupportsLinks) return;
-                  if (link.linkType === "contradiction" && !showContradictsLinks) return;
+                  if (link.linkType === "contradicts" && !showContradictsLinks) return;
                   if (link.linkType === "contextualizes" && !showContextualizesLinks) return;
                 }
 
@@ -1332,76 +1346,123 @@ export const KnowledgeGraph: React.FC<KnowledgeGraphProps> = ({
               <div className="text-lg text-gray-600 font-medium">Loading graph...</div>
             </div>
           )}
-          {/* Bottom controls: toggles and reset button */}
-          <div className="absolute bottom-4 left-4 flex items-center gap-3 bg-white/90 backdrop-blur-sm rounded-lg p-2">
-            {/* Claims toggle with link types */}
-            <div className="flex flex-col gap-1">
-              <Button size="sm" variant={showClaims ? "default" : "secondary"} onClick={() => setShowClaims(!showClaims)}>
-                Claims ({counts.claims})
+          {/* Filter panel */}
+          <div className="absolute bottom-4 left-4 flex flex-col gap-3 bg-white rounded-lg p-4 shadow-lg border border-gray-200 min-w-[220px]">
+            {/* Header with counts */}
+            <div className="text-sm text-gray-600">
+              {counts.claims} claims and {counts.observations} evidence Nodes
+            </div>
+
+            {/* Highlight contradictions button - only show if there are contradictions */}
+            {(counts.claimContradictsLinks + counts.contradictsLinks > 0) && (
+              <Button
+                size="sm"
+                variant={highlightContradictions ? "default" : "destructive"}
+                onClick={() => setHighlightContradictions(!highlightContradictions)}
+                className="w-full"
+              >
+                {highlightContradictions ? "✓ Highlighting Contradictions" : "Highlight Contradictions"} ({counts.claimContradictsLinks + counts.contradictsLinks})
               </Button>
-              <div className="flex gap-1">
-                <Button
-                  size="sm"
-                  variant={!showClaims ? "ghost" : showPremiseLinks ? "default" : "secondary"}
-                  disabled={!showClaims}
-                  onClick={() => setShowPremiseLinks(!showPremiseLinks)}
-                >
-                  premise ({counts.premiseLinks})
-                </Button>
-                <Button
-                  size="sm"
-                  variant={!showClaims ? "ghost" : showClaimContradictsLinks ? "default" : "secondary"}
-                  disabled={!showClaims}
-                  onClick={() => setShowClaimContradictsLinks(!showClaimContradictsLinks)}
-                >
-                  contradicts ({counts.claimContradictsLinks})
-                </Button>
+            )}
+
+            {/* Filter section */}
+            <div className="flex flex-col gap-2">
+              <div className="text-sm font-medium text-gray-700">Filter your graph</div>
+
+              {/* Claims checkbox */}
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={showClaims}
+                  onChange={() => setShowClaims(!showClaims)}
+                  className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                />
+                <span className="text-sm text-gray-700">Claims ({counts.claims})</span>
+              </label>
+
+              {/* Claims sub-options */}
+              <div className="ml-6 flex flex-col gap-1">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={showPremiseLinks}
+                    onChange={() => setShowPremiseLinks(!showPremiseLinks)}
+                    disabled={!showClaims || highlightContradictions}
+                    className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 disabled:opacity-50"
+                  />
+                  <span className={`text-sm ${!showClaims || highlightContradictions ? 'text-gray-400' : 'text-gray-600'}`}>
+                    Premise connections ({counts.premiseLinks})
+                  </span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={showClaimContradictsLinks}
+                    onChange={() => setShowClaimContradictsLinks(!showClaimContradictsLinks)}
+                    disabled={!showClaims || highlightContradictions}
+                    className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 disabled:opacity-50"
+                  />
+                  <span className={`text-sm ${!showClaims || highlightContradictions ? 'text-gray-400' : 'text-gray-600'}`}>
+                    Contradiction connections ({counts.claimContradictsLinks})
+                  </span>
+                </label>
+              </div>
+
+              {/* Evidence checkbox */}
+              <label className="flex items-center gap-2 cursor-pointer mt-2">
+                <input
+                  type="checkbox"
+                  checked={showObservations}
+                  onChange={() => setShowObservations(!showObservations)}
+                  className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                />
+                <span className="text-sm text-gray-700">Evidence ({counts.observations})</span>
+              </label>
+
+              {/* Evidence sub-options */}
+              <div className="ml-6 flex flex-col gap-1">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={showSupportsLinks}
+                    onChange={() => setShowSupportsLinks(!showSupportsLinks)}
+                    disabled={!showObservations || highlightContradictions}
+                    className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 disabled:opacity-50"
+                  />
+                  <span className={`text-sm ${!showObservations || highlightContradictions ? 'text-gray-400' : 'text-gray-600'}`}>
+                    Supports ({counts.supportsLinks})
+                  </span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={showContradictsLinks}
+                    onChange={() => setShowContradictsLinks(!showContradictsLinks)}
+                    disabled={!showObservations || highlightContradictions}
+                    className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 disabled:opacity-50"
+                  />
+                  <span className={`text-sm ${!showObservations || highlightContradictions ? 'text-gray-400' : 'text-gray-600'}`}>
+                    Contradicts ({counts.contradictsLinks})
+                  </span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={showContextualizesLinks}
+                    onChange={() => setShowContextualizesLinks(!showContextualizesLinks)}
+                    disabled={!showObservations || highlightContradictions}
+                    className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 disabled:opacity-50"
+                  />
+                  <span className={`text-sm ${!showObservations || highlightContradictions ? 'text-gray-400' : 'text-gray-600'}`}>
+                    Contextualizes ({counts.contextualizesLinks})
+                  </span>
+                </label>
               </div>
             </div>
 
-            {/* Observations toggle with link types */}
-            <div className="flex flex-col gap-1">
-              <Button size="sm" variant={showObservations ? "default" : "secondary"} onClick={() => setShowObservations(!showObservations)}>
-                Evidence ({counts.observations})
-              </Button>
-              <div className="flex gap-1">
-                <Button
-                  size="sm"
-                  variant={!showObservations ? "ghost" : showSupportsLinks ? "default" : "secondary"}
-                  disabled={!showObservations}
-                  onClick={() => setShowSupportsLinks(!showSupportsLinks)}
-                >
-                  supports ({counts.supportsLinks})
-                </Button>
-                <Button
-                  size="sm"
-                  variant={!showObservations ? "ghost" : showContradictsLinks ? "default" : "secondary"}
-                  disabled={!showObservations}
-                  onClick={() => setShowContradictsLinks(!showContradictsLinks)}
-                >
-                  contradicts ({counts.contradictsLinks})
-                </Button>
-                <Button
-                  size="sm"
-                  variant={!showObservations ? "ghost" : showContextualizesLinks ? "default" : "secondary"}
-                  disabled={!showObservations}
-                  onClick={() => setShowContextualizesLinks(!showContextualizesLinks)}
-                >
-                  contextualizes ({counts.contextualizesLinks})
-                </Button>
-              </div>
-            </div>
-
-            <Button
-              size="sm"
-              variant={highlightContradictions ? "default" : "secondary"}
-              onClick={() => setHighlightContradictions(!highlightContradictions)}
-            >
-              Highlight Contradictions
-            </Button>
-
-            <Button size="sm" onClick={() => window.location.reload()}>
-              Reset Layout
+            {/* Reset button */}
+            <Button size="sm" variant="outline" onClick={() => window.location.reload()} className="w-full">
+              Reset Graph
             </Button>
           </div>
         </div>

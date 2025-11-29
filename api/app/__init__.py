@@ -1,6 +1,6 @@
-__version__ = "0.1.1"
+__version__ = "0.1.2"
 __release_notes__ = """
 
-16 workers, grobid timeout
+run extraction on duplicates if none already
 
 """
