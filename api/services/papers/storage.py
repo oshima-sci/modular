@@ -1,3 +1,4 @@
+import asyncio
 import hashlib
 from uuid import UUID, uuid4
 
@@ -103,9 +104,9 @@ class PaperStorage:
                 error=str(e)
             )
 
-    def upload_papers(self, files: list[tuple[str, bytes, str]]) -> list[PaperUploadResult]:
+    async def upload_papers(self, files: list[tuple[str, bytes, str]]) -> list[PaperUploadResult]:
         """
-        Upload multiple papers.
+        Upload multiple papers concurrently.
 
         Args:
             files: List of (filename, content, content_type) tuples
@@ -113,11 +114,20 @@ class PaperStorage:
         Returns:
             List of PaperUploadResult for each file
         """
-        results = []
-        for filename, content, content_type in files:
-            result = self.upload_paper(filename, content, content_type)
-            results.append(result)
-        return results
+        semaphore = asyncio.Semaphore(10)  # Cap concurrent uploads
+
+        async def upload_with_limit(filename: str, content: bytes, content_type: str):
+            async with semaphore:
+                loop = asyncio.get_event_loop()
+                return await loop.run_in_executor(
+                    None, self.upload_paper, filename, content, content_type
+                )
+
+        tasks = [
+            upload_with_limit(filename, content, content_type)
+            for filename, content, content_type in files
+        ]
+        return await asyncio.gather(*tasks)
 
     def get_paper(self, paper_id: UUID) -> Paper | None:
         """Get a paper by ID."""

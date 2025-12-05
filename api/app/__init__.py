@@ -1,6 +1,6 @@
-__version__ = "0.1.2"
+__version__ = "0.1.3"
 __release_notes__ = """
 
-run extraction on duplicates if none already
+scale\
 
 """

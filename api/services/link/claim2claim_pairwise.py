@@ -185,7 +185,7 @@ class UsageStats:
 
 from concurrent.futures import ThreadPoolExecutor
 
-MAX_CONCURRENT_REQUESTS = 200
+MAX_CONCURRENT_REQUESTS = 50
 
 # Explicit thread pool for I/O-bound API calls (default is only 32)
 _executor = ThreadPoolExecutor(max_workers=MAX_CONCURRENT_REQUESTS)

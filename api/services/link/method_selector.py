@@ -61,6 +61,7 @@ def _format_claim_for_llm(claim: dict) -> str:
     formatted = {
         "id": claim["id"],
         "paper_id": claim["paper_id"],
+        "paper_title": claim.get("paper_title", ""),
         "claim": claim["content"].get("rephrased_claim", ""),
     }
     return json.dumps(formatted, indent=2)
@@ -82,7 +83,7 @@ def _format_methods_for_llm(methods: list[dict]) -> str:
 
 # --- Async Processing ---
 
-MAX_CONCURRENT_REQUESTS = 100
+MAX_CONCURRENT_REQUESTS = 50
 
 
 async def _select_methods_for_claim(

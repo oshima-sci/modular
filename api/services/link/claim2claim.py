@@ -1,14 +1,14 @@
 """Link claims to other claims within a library using DSPy."""
 import asyncio
 import logging
-from typing import Any
+from typing import Any, Callable
 from uuid import UUID
 
 import dspy
 import numpy as np
 from pydantic import BaseModel, Field
 
-from db import ExtractQueries, VectorQueries
+from db import ExtractQueries, PaperQueries, VectorQueries
 
 logger = logging.getLogger(__name__)
 
@@ -313,6 +313,33 @@ def _fetch_claims_with_embeddings(library_id: str) -> list[dict]:
 # --- Helper Functions ---
 
 
+def add_paper_titles_to_claims(claims: list[dict]) -> list[dict]:
+    """
+    Fetch and merge paper titles into claim dicts.
+
+    Args:
+        claims: List of claim dicts (must have 'paper_id' key)
+
+    Returns:
+        Same list with 'paper_title' key added to each claim
+    """
+    if not claims:
+        return claims
+
+    paper_ids = list({c["paper_id"] for c in claims if c.get("paper_id")})
+    if not paper_ids:
+        return claims
+
+    papers = PaperQueries()
+    titles_by_id = papers.get_titles_by_ids(paper_ids)
+
+    for claim in claims:
+        paper_id = claim.get("paper_id")
+        claim["paper_title"] = titles_by_id.get(paper_id, "") if paper_id else ""
+
+    return claims
+
+
 def _format_claims_for_llm(claims: list[dict]) -> str:
     """Format claims as JSON for the DSPy module."""
     import json
@@ -322,6 +349,7 @@ def _format_claims_for_llm(claims: list[dict]) -> str:
         formatted.append({
             "id": claim["id"],
             "paper_id": claim["paper_id"],
+            "paper_title": claim.get("paper_title", ""),
             "claim": claim["content"].get("rephrased_claim", ""),
         })
     return json.dumps(formatted, indent=2)
@@ -357,7 +385,7 @@ def _deduplicate_links(links: list[ClaimLink]) -> list[ClaimLink]:
 # --- Main Orchestration ---
 
 # Max concurrent LLM requests
-MAX_CONCURRENT_REQUESTS = 100
+MAX_CONCURRENT_REQUESTS = 50
 
 # Default batch size for saving links
 DEFAULT_BATCH_SIZE = 20
@@ -403,11 +431,20 @@ async def _link_claims_async(
     job_id: str | None = None,
     valid_claim_ids: set[str] | None = None,
     batch_size: int = DEFAULT_BATCH_SIZE,
+    progress_callback: Callable[[list[str]], None] | None = None,
 ) -> tuple[list[ClaimLink], UsageStats, int]:
     """
     Run linking on all groups concurrently with semaphore limit.
 
     Saves links to database per-batch for partial progress persistence.
+
+    Args:
+        groups: List of claim groups to process
+        max_concurrent: Maximum concurrent LLM requests
+        job_id: Job ID for saving links
+        valid_claim_ids: Set of valid claim IDs for validation
+        batch_size: Number of groups per batch
+        progress_callback: Optional callback(processed_claim_ids) called after each batch
 
     Returns:
         Tuple of (all_links, usage_stats, total_saved)
@@ -454,6 +491,11 @@ async def _link_claims_async(
             total_saved += saved
             logger.info(f"Saved {saved} c2c links from batch {batch_start // batch_size + 1}")
 
+        # Report progress - extract pivot claim ID from each group (first claim is pivot)
+        if progress_callback:
+            batch_pivot_ids = [g.claims[0]["id"] for g in batch_groups]
+            progress_callback(batch_pivot_ids)
+
     # Aggregate usage from all history entries after completion
     stats = _aggregate_usage_from_history()
 
@@ -475,6 +517,7 @@ def link_claims(
     similarity_threshold: float = 0.35,
     job_id: str | None = None,
     valid_claim_ids: set[str] | None = None,
+    progress_callback: Callable[[list[str]], None] | None = None,
 ) -> C2CLinkingResult:
     """
     Find links between input claims and all claims in a library.
@@ -523,6 +566,10 @@ def link_claims(
     library_claims = _fetch_claims_with_embeddings(library_id_str)
     logger.info(f"Fetched {len(library_claims)} total claims from library")
 
+    # Add paper titles to all claims for LLM context
+    add_paper_titles_to_claims(input_claims)
+    add_paper_titles_to_claims(library_claims)
+
     if len(library_claims) < 2:
         logger.info("Not enough claims in library to link")
         return C2CLinkingResult(
@@ -568,6 +615,7 @@ def link_claims(
             groups,
             job_id=job_id,
             valid_claim_ids=valid_claim_ids,
+            progress_callback=progress_callback,
         )
     )
 

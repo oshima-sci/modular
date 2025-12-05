@@ -68,3 +68,15 @@ class PaperQueries:
     def set_parsed_path(self, paper_id: str | UUID, parsed_path: str) -> dict | None:
         """Set the parsed_path for a paper."""
         return self.update(paper_id, {"parsed_path": parsed_path})
+
+    def get_titles_by_ids(self, paper_ids: list[str | UUID]) -> dict[str, str]:
+        """Get paper titles for a list of paper IDs.
+
+        Returns:
+            Dict mapping paper_id -> title
+        """
+        if not paper_ids:
+            return {}
+        str_ids = [str(pid) for pid in paper_ids]
+        result = self.db.table("papers").select("id, title").in_("id", str_ids).execute()
+        return {row["id"]: row["title"] or "" for row in result.data}

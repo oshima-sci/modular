@@ -31,8 +31,8 @@ async def upload_papers(files: list[UploadFile] = File(...)):
         content_type = file.content_type or "application/pdf"
         file_data.append((file.filename, content, content_type))
 
-    # Upload all papers
-    results = storage.upload_papers(file_data)
+    # Upload all papers concurrently
+    results = await storage.upload_papers(file_data)
 
     # Compute summary stats
     successful = sum(1 for r in results if r.success and not r.duplicate_of)

@@ -2,14 +2,14 @@
 import asyncio
 import logging
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Callable
 from uuid import UUID
 
 import dspy
 from pydantic import BaseModel, Field
 
 from db import ExtractQueries, VectorQueries
-from services.link.claim2claim import UsageStats
+from services.link.claim2claim import UsageStats, add_paper_titles_to_claims
 
 logger = logging.getLogger(__name__)
 
@@ -314,6 +314,7 @@ def _format_claim_for_llm(claim: dict) -> str:
     formatted = {
         "id": claim["id"],
         "paper_id": claim["paper_id"],
+        "paper_title": claim.get("paper_title", ""),
         "claim": claim["content"].get("rephrased_claim", ""),
     }
     return json.dumps(formatted, indent=2)
@@ -464,7 +465,7 @@ def link_observations_to_claim(
 
 # --- Batch/Library-Level Orchestration ---
 
-MAX_CONCURRENT_REQUESTS = 100
+MAX_CONCURRENT_REQUESTS = 50
 
 # Default batch size for saving links
 DEFAULT_BATCH_SIZE = 20
@@ -565,6 +566,7 @@ async def _link_claims_async(
     valid_claim_ids: set[str] | None = None,
     valid_observation_ids: set[str] | None = None,
     batch_size: int = DEFAULT_BATCH_SIZE,
+    progress_callback: Callable[[list[str]], None] | None = None,
 ) -> tuple[list[EvidenceLink], UsageStats, int]:
     """
     Run evidence linking on multiple claims concurrently.
@@ -572,6 +574,18 @@ async def _link_claims_async(
     Each claim task handles its own method selection and linking sequentially,
     avoiding nested event loop issues. Saves links to database per-batch for
     partial progress persistence.
+
+    Args:
+        claims: List of claim dicts to process
+        observations: All observations in the library
+        methods: All methods in the library
+        methods_lookup: Dict mapping method_id -> method dict
+        max_concurrent: Maximum concurrent LLM requests
+        job_id: Job ID for saving links
+        valid_claim_ids: Set of valid claim IDs for validation
+        valid_observation_ids: Set of valid observation IDs for validation
+        batch_size: Number of claims per batch
+        progress_callback: Optional callback(processed_claim_ids) called after each batch
 
     Returns:
         Tuple of (links, usage_stats, total_saved)
@@ -632,6 +646,11 @@ async def _link_claims_async(
             total_saved += saved
             logger.info(f"Saved {saved} c2o links from batch {batch_start // batch_size + 1}")
 
+        # Report progress - claim IDs from this batch
+        if progress_callback:
+            batch_claim_ids = [c["id"] for c in batch_claims]
+            progress_callback(batch_claim_ids)
+
     # Aggregate usage from all history entries after completion
     stats = _aggregate_usage_from_history()
 
@@ -644,6 +663,7 @@ def link_observations_to_input_claims(
     job_id: str | None = None,
     valid_claim_ids: set[str] | None = None,
     valid_observation_ids: set[str] | None = None,
+    progress_callback: Callable[[list[str]], None] | None = None,
 ) -> C2OLinkingResult:
     """
     Link input claims against ALL observations in a library.
@@ -705,6 +725,9 @@ def link_observations_to_input_claims(
     methods = _fetch_methods(library_id_str)
     logger.info(f"Fetched {len(methods)} methods for preselection")
 
+    # Add paper titles to claims for LLM context
+    add_paper_titles_to_claims(input_claims)
+
     # Build methods lookup for observation context
     methods_lookup = {m["id"]: m for m in methods}
 
@@ -722,6 +745,7 @@ def link_observations_to_input_claims(
             job_id=job_id,
             valid_claim_ids=valid_claim_ids,
             valid_observation_ids=valid_observation_ids,
+            progress_callback=progress_callback,
         )
     )
 

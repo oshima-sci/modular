@@ -135,13 +135,22 @@ class LibraryQueries:
         """Get all links where from_id is in the given extract IDs."""
         if not extract_ids:
             return []
-        result = (
-            self.db.table("extract_links")
-            .select("*")
-            .in_("from_id", [str(eid) for eid in extract_ids])
-            .execute()
-        )
-        return result.data
+
+        # Batch to avoid PostgREST URL length limits
+        BATCH_SIZE = 500
+        all_links = []
+
+        for i in range(0, len(extract_ids), BATCH_SIZE):
+            batch = extract_ids[i : i + BATCH_SIZE]
+            result = (
+                self.db.table("extract_links")
+                .select("*")
+                .in_("from_id", [str(eid) for eid in batch])
+                .execute()
+            )
+            all_links.extend(result.data)
+
+        return all_links
 
     def get_full_library(self, library_id: str | UUID) -> dict | None:
         """Get a library with all papers, extracts (latest per paper), and links."""

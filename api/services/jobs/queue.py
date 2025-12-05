@@ -255,3 +255,53 @@ class JobQueue:
         if self.has_recent_pending_link_job(library_id):
             return False
         return self.has_unlinked_extracts_for_library(library_id)
+
+    def update_job_progress(
+        self,
+        job_id: str | UUID,
+        progress: dict[str, Any],
+    ) -> bool:
+        """
+        Update the result column with progress data for a running job.
+
+        Used to checkpoint long-running jobs so they can resume on failure.
+        The progress is stored in result column and will be overwritten
+        with final results on completion.
+
+        Args:
+            job_id: UUID of the job
+            progress: Progress data to store (e.g., {"c2c_processed": [...], "c2o_processed": [...]})
+
+        Returns:
+            True if update succeeded
+        """
+        result = (
+            self.db.table("jobs")
+            .update({"result": {"progress": progress}})
+            .eq("id", str(job_id))
+            .execute()
+        )
+        return len(result.data) > 0
+
+    def get_job_progress(self, job_id: str | UUID) -> dict[str, Any] | None:
+        """
+        Get progress data from a job's result column.
+
+        Args:
+            job_id: UUID of the job
+
+        Returns:
+            Progress dict if exists, None otherwise
+        """
+        result = (
+            self.db.table("jobs")
+            .select("result")
+            .eq("id", str(job_id))
+            .execute()
+        )
+
+        if not result.data or not result.data[0].get("result"):
+            return None
+
+        job_result = result.data[0]["result"]
+        return job_result.get("progress")
