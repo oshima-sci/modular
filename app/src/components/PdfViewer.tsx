@@ -96,7 +96,14 @@ export default function PdfViewer({ pdfUrl, bboxes = [], highlightedId, onBboxCl
       >
         {Array.from({ length: numPages }, (_, i) => i + 1).map(pageNumber => {
           const dims = pageDimensions.get(pageNumber);
-          const pageBoxes = bboxes.filter(b => b.page === pageNumber);
+          // Extract element ID from highlightedId (format: "elementId-index")
+          const highlightedElementId = highlightedId?.replace(/-\d+$/, '');
+          // Only show bboxes for the highlighted element
+          const pageBoxes = bboxes.filter(b =>
+            b.page === pageNumber &&
+            highlightedElementId &&
+            b.id.startsWith(`${highlightedElementId}-`)
+          );
 
           return (
             <div key={pageNumber} className="relative mb-4 bg-white shadow" data-page={pageNumber}>

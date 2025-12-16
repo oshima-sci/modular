@@ -28,7 +28,6 @@ interface NodeDetailsProps {
   variantItems: VariantItem[];
   isShowingEvidence: boolean;
   allObservationsVisible: boolean;
-  onPaperClick?: (paperId: string) => void;
   onViewSource?: (nodeId: string) => void;
   onNodeSelect?: (node: Node) => void;
   onToggleEvidence?: (claimId: string | null) => void;
@@ -42,7 +41,6 @@ const NodeDetails: React.FC<NodeDetailsProps> = ({
   variantItems,
   isShowingEvidence,
   allObservationsVisible,
-  onPaperClick,
   onViewSource,
   onNodeSelect,
   onToggleEvidence,
@@ -88,7 +86,7 @@ const NodeDetails: React.FC<NodeDetailsProps> = ({
                 )}
 
                 <button
-                  onClick={() => onPaperClick?.(paperId)}
+                  onClick={() => onViewSource?.(node.id)}
                   className="text-sm text-gray-700 bg-gray-50 px-2 py-1 rounded text-left hover:bg-blue-50 hover:text-blue-700 transition-colors cursor-pointer flex items-center gap-2 mt-1"
                 >
                   <svg
@@ -579,7 +577,6 @@ interface ElementPanelProps {
   showObservations: boolean;
   showEvidenceForClaimId: string | null;
   onClearSelection: () => void;
-  onPaperClick?: (paperId: string) => void;
   onViewSource?: (nodeId: string) => void;
   onNodeSelect?: (node: Node | null) => void;
   onToggleEvidence?: (claimId: string | null) => void;
@@ -596,7 +593,6 @@ export const ElementPanel: React.FC<ElementPanelProps> = ({
   showObservations,
   showEvidenceForClaimId,
   onClearSelection,
-  onPaperClick,
   onViewSource,
   onNodeSelect,
   onToggleEvidence,
@@ -752,7 +748,6 @@ export const ElementPanel: React.FC<ElementPanelProps> = ({
                 variantItems={variantItems}
                 isShowingEvidence={showEvidenceForClaimId === panelNode.id}
                 allObservationsVisible={showObservations}
-                onPaperClick={onPaperClick}
                 onViewSource={onViewSource}
                 onNodeSelect={onNodeSelect}
                 onToggleEvidence={onToggleEvidence}

@@ -25,9 +25,10 @@ export default function Library() {
   const {
     loading: sourceLoading,
     bboxes,
+    currentPaperId,
     highlightedBboxId,
     setHighlightedBboxId,
-    loadSourceForElements,
+    loadSourceForPaper,
     clearSource,
   } = useSourceLoader();
 
@@ -37,34 +38,13 @@ export default function Library() {
   const [selectedLink, setSelectedLink] = useState<GraphLink | null>(null);
   const [hoveredLink, setHoveredLink] = useState<GraphLink | null>(null);
 
-  // Source panel state
-  const [currentPaperId, setCurrentPaperId] = useState<string | null>(null);
-
   // Filter state shared between GraphPanel and ElementPanel
   const [showObservations, setShowObservations] = useState(false);
   const [showEvidenceForClaimId, setShowEvidenceForClaimId] = useState<
     string | null
   >(null);
 
-  // Handle "View Source" click from paper citation
-  const handlePaperClick = useCallback(
-    (paperId: string) => {
-      const activeNode = selectedNode || hoveredNode;
-      if (!activeNode) return;
-
-      const elementIds = activeNode.sourceElementIds;
-      if (elementIds.length === 0) {
-        console.warn("No source elements for this node");
-        return;
-      }
-
-      setCurrentPaperId(paperId);
-      loadSourceForElements(paperId, elementIds, elementIds[0]);
-    },
-    [selectedNode, hoveredNode, loadSourceForElements]
-  );
-
-  // Handle "View Source" click from observation evidence
+  // Handle "View Source" click
   const handleViewSource = useCallback(
     (nodeId: string) => {
       if (!library?.data) return;
@@ -87,10 +67,16 @@ export default function Library() {
         return;
       }
 
-      setCurrentPaperId(extract.paper_id);
-      loadSourceForElements(extract.paper_id, elementIds, elementIds[0]);
+      // If same paper is already loaded, just update the highlight
+      if (extract.paper_id === currentPaperId) {
+        setHighlightedBboxId(`${elementIds[0]}-0`);
+        return;
+      }
+
+      // Different paper - load all bboxes for the new paper
+      loadSourceForPaper(extract.paper_id, elementIds[0]);
     },
-    [library?.data, loadSourceForElements]
+    [library?.data, currentPaperId, setHighlightedBboxId, loadSourceForPaper]
   );
 
   // Clear all selection
@@ -102,7 +88,6 @@ export default function Library() {
 
   // Close source panel
   const handleCloseSource = useCallback(() => {
-    setCurrentPaperId(null);
     clearSource();
   }, [clearSource]);
 
@@ -150,7 +135,6 @@ export default function Library() {
             showObservations={showObservations}
             showEvidenceForClaimId={showEvidenceForClaimId}
             onClearSelection={handleClearSelection}
-            onPaperClick={handlePaperClick}
             onViewSource={handleViewSource}
             onNodeSelect={setSelectedNode}
             onToggleEvidence={setShowEvidenceForClaimId}

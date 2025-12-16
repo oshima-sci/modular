@@ -1,36 +1,31 @@
 import { useState, useCallback } from "react";
 import type { BBox } from "@/components/PdfViewer";
-import { getTeiUrl, parseTeiForElements } from "@/lib/graph-utils";
+import { getTeiUrl, parseAllTeiBboxes } from "@/lib/graph-utils";
 
 interface UseSourceLoaderResult {
   loading: boolean;
   bboxes: BBox[];
+  currentPaperId: string | null;
   highlightedBboxId: string | null;
   setHighlightedBboxId: (id: string | null) => void;
-  loadSourceForElements: (
-    paperId: string,
-    elementIds: string[],
-    highlightElementId?: string
-  ) => Promise<void>;
+  loadSourceForPaper: (paperId: string, highlightElementId?: string) => Promise<void>;
   clearSource: () => void;
 }
 
 /**
  * Hook to manage TEI source loading and bbox extraction.
+ * Loads all bboxes for a paper upfront so switching nodes doesn't require refetching.
  */
 export function useSourceLoader(): UseSourceLoaderResult {
   const [loading, setLoading] = useState(false);
   const [bboxes, setBboxes] = useState<BBox[]>([]);
+  const [currentPaperId, setCurrentPaperId] = useState<string | null>(null);
   const [highlightedBboxId, setHighlightedBboxId] = useState<string | null>(
     null
   );
 
-  const loadSourceForElements = useCallback(
-    async (
-      paperId: string,
-      elementIds: string[],
-      highlightElementId?: string
-    ) => {
+  const loadSourceForPaper = useCallback(
+    async (paperId: string, highlightElementId?: string) => {
       setLoading(true);
       try {
         const teiUrl = getTeiUrl(paperId);
@@ -38,19 +33,24 @@ export function useSourceLoader(): UseSourceLoaderResult {
         if (!res.ok) throw new Error(`Failed to fetch TEI: ${res.statusText}`);
 
         const teiXml = await res.text();
-        const parsedBboxes = parseTeiForElements(teiXml, elementIds);
+        const parsedBboxes = parseAllTeiBboxes(teiXml);
 
+        setCurrentPaperId(paperId);
         setBboxes(parsedBboxes);
         setHighlightedBboxId(
-          highlightElementId ||
-            (parsedBboxes.length > 0 ? parsedBboxes[0].id : null)
+          highlightElementId
+            ? `${highlightElementId}-0`
+            : parsedBboxes.length > 0
+              ? parsedBboxes[0].id
+              : null
         );
 
         console.log(
-          `Loaded ${parsedBboxes.length} bboxes for elements: ${elementIds.join(", ")}`
+          `Loaded ${parsedBboxes.length} bboxes for paper: ${paperId}`
         );
       } catch (err) {
         console.error("Failed to load source:", err);
+        setCurrentPaperId(null);
         setBboxes([]);
         setHighlightedBboxId(null);
       } finally {
@@ -61,6 +61,7 @@ export function useSourceLoader(): UseSourceLoaderResult {
   );
 
   const clearSource = useCallback(() => {
+    setCurrentPaperId(null);
     setBboxes([]);
     setHighlightedBboxId(null);
   }, []);
@@ -68,9 +69,10 @@ export function useSourceLoader(): UseSourceLoaderResult {
   return {
     loading,
     bboxes,
+    currentPaperId,
     highlightedBboxId,
     setHighlightedBboxId,
-    loadSourceForElements,
+    loadSourceForPaper,
     clearSource,
   };
 }

@@ -57,6 +57,47 @@ export function parseTeiForElements(teiXml: string, elementIds: string[]): BBox[
 }
 
 /**
+ * Parse TEI XML and extract ALL bboxes from the document.
+ * Used when loading a paper to avoid re-fetching when switching between nodes.
+ */
+export function parseAllTeiBboxes(teiXml: string): BBox[] {
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(teiXml, "text/xml");
+  const bboxes: BBox[] = [];
+
+  // Find all elements with xml:id that have coords
+  const allElements = doc.querySelectorAll("[*|id]");
+  allElements.forEach((el) => {
+    const xmlId =
+      el.getAttributeNS("http://www.w3.org/XML/1998/namespace", "id") ||
+      el.getAttribute("xml:id");
+    if (!xmlId) return;
+
+    const coordsAttr = el.getAttribute("coords");
+    if (!coordsAttr) return;
+
+    // coords can have multiple segments separated by ";" (one per line of text)
+    const segments = coordsAttr.split(";");
+    segments.forEach((segment, index) => {
+      const parts = segment.split(",").map(Number);
+      if (parts.length >= 5) {
+        const [page, x, y, width, height] = parts;
+        bboxes.push({
+          id: `${xmlId}-${index}`,
+          page,
+          x,
+          y,
+          width,
+          height,
+        });
+      }
+    });
+  });
+
+  return bboxes;
+}
+
+/**
  * Transform library data into graph data with merged duplicate nodes.
  * Uses union-find to group duplicates and deduplicates links.
  */
