@@ -1,0 +1,390 @@
+import type { LibraryData } from "@/hooks/useLibrary";
+import type { Node, Link, GraphData, Paper, Method } from "@/types/graph";
+import type { BBox } from "@/components/PdfViewer";
+
+// Supabase storage URL for public bucket access
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
+const STORAGE_BUCKET = "papers";
+
+export function getPdfUrl(paperId: string): string {
+  return `${SUPABASE_URL}/storage/v1/object/public/${STORAGE_BUCKET}/${paperId}/original.pdf`;
+}
+
+export function getTeiUrl(paperId: string): string {
+  return `${SUPABASE_URL}/storage/v1/object/public/${STORAGE_BUCKET}/${paperId}/parsed.tei`;
+}
+
+/**
+ * Parse TEI XML and extract bboxes for specific element IDs.
+ * Each element can have multiple line segments, so we create one bbox per segment.
+ */
+export function parseTeiForElements(teiXml: string, elementIds: string[]): BBox[] {
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(teiXml, "text/xml");
+  const bboxes: BBox[] = [];
+  const elementIdSet = new Set(elementIds);
+
+  // Find elements with xml:id matching our target IDs
+  const allElements = doc.querySelectorAll("[*|id]");
+  allElements.forEach((el) => {
+    const xmlId =
+      el.getAttributeNS("http://www.w3.org/XML/1998/namespace", "id") ||
+      el.getAttribute("xml:id");
+    if (!xmlId || !elementIdSet.has(xmlId)) return;
+
+    const coordsAttr = el.getAttribute("coords");
+    if (!coordsAttr) return;
+
+    // coords can have multiple segments separated by ";" (one per line of text)
+    const segments = coordsAttr.split(";");
+    segments.forEach((segment, index) => {
+      const parts = segment.split(",").map(Number);
+      if (parts.length >= 5) {
+        const [page, x, y, width, height] = parts;
+        bboxes.push({
+          id: `${xmlId}-${index}`,
+          page,
+          x,
+          y,
+          width,
+          height,
+        });
+      }
+    });
+  });
+
+  return bboxes;
+}
+
+/**
+ * Transform library data into graph data with merged duplicate nodes.
+ * Uses union-find to group duplicates and deduplicates links.
+ */
+export function transformLibraryToGraphData(libraryData: LibraryData): {
+  graphData: GraphData;
+  papersMap: Map<string, Paper>;
+  methodsMap: Map<string, Method>;
+} {
+  // Build papers map
+  const papersMap = new Map<string, Paper>();
+  libraryData.papers.forEach((p) => papersMap.set(p.id, p));
+
+  // Build methods map
+  const methodsMap = new Map<string, Method>();
+  libraryData.extracts.methods?.forEach((m) =>
+    methodsMap.set(m.id, {
+      id: m.id,
+      paper_id: m.paper_id,
+      type: "method",
+      content: {
+        method_summary: m.content.method_summary,
+        novel_method: m.content.novel_method,
+      },
+    })
+  );
+
+  // Transform claims into nodes
+  const claimNodes: Node[] = libraryData.extracts.claims.map((claim) => ({
+    id: claim.id,
+    type: "claim" as const,
+    displayText: claim.content.rephrased_claim || "",
+    rawContent: claim.content,
+    paperIds: [claim.paper_id],
+    sourceElementIds:
+      claim.content.source_elements?.map((s) => s.source_element_id) || [],
+  }));
+
+  // Transform observations into nodes
+  const observationNodes: Node[] = libraryData.extracts.observations.map(
+    (obs) => ({
+      id: obs.id,
+      type: "observation" as const,
+      displayText: obs.content.observation_summary || "",
+      rawContent: obs.content,
+      paperIds: [obs.paper_id],
+      sourceElementIds:
+        obs.content.source_elements?.map((s) => s.source_element_id) || [],
+      observationType: obs.content.observation_type,
+      methodReference: obs.content.method_reference,
+    })
+  );
+
+  // Build initial node map
+  const nodeMap = new Map<string, Node>();
+  [...claimNodes, ...observationNodes].forEach((n) => nodeMap.set(n.id, n));
+
+  // Find duplicate links and build union-find structure for merging
+  const duplicateLinks = libraryData.links.filter(
+    (link) => link.content.link_type === "duplicate"
+  );
+
+  // Union-Find to group duplicates
+  const parent = new Map<string, string>();
+  const find = (id: string): string => {
+    if (!parent.has(id)) parent.set(id, id);
+    if (parent.get(id) !== id) {
+      parent.set(id, find(parent.get(id)!));
+    }
+    return parent.get(id)!;
+  };
+  const union = (a: string, b: string) => {
+    const rootA = find(a);
+    const rootB = find(b);
+    if (rootA !== rootB) {
+      parent.set(rootB, rootA);
+    }
+  };
+
+  // Union all duplicate pairs
+  duplicateLinks.forEach((link) => {
+    if (nodeMap.has(link.from_id) && nodeMap.has(link.to_id)) {
+      union(link.from_id, link.to_id);
+    }
+  });
+
+  // Group nodes by their root
+  const groups = new Map<string, string[]>();
+  nodeMap.forEach((_, id) => {
+    const root = find(id);
+    if (!groups.has(root)) groups.set(root, []);
+    groups.get(root)!.push(id);
+  });
+
+  // Create merged nodes and mapping from old IDs to new IDs
+  const mergedNodes: Node[] = [];
+  const idMapping = new Map<string, string>();
+
+  groups.forEach((memberIds, rootId) => {
+    if (memberIds.length === 1) {
+      // No merge needed, keep original node
+      const node = nodeMap.get(memberIds[0])!;
+      mergedNodes.push(node);
+      idMapping.set(memberIds[0], memberIds[0]);
+    } else {
+      // Create merged node
+      const representativeNode = nodeMap.get(rootId)!;
+      const allPaperIds = new Set<string>();
+      const allSourceElementIds = new Set<string>();
+      memberIds.forEach((id) => {
+        const n = nodeMap.get(id)!;
+        n.paperIds.forEach((pid) => allPaperIds.add(pid));
+        n.sourceElementIds.forEach((sid) => allSourceElementIds.add(sid));
+      });
+
+      const mergedNode: Node = {
+        id: `merged-${rootId}`,
+        type: representativeNode.type,
+        displayText: representativeNode.displayText,
+        rawContent: {
+          ...representativeNode.rawContent,
+          mergedFrom: memberIds.map((id) => ({
+            id,
+            displayText: nodeMap.get(id)!.displayText,
+            rawContent: nodeMap.get(id)!.rawContent,
+          })),
+        },
+        paperIds: Array.from(allPaperIds),
+        sourceElementIds: Array.from(allSourceElementIds),
+        observationType: representativeNode.observationType,
+        methodReference: representativeNode.methodReference,
+        mergedNodeIds: memberIds,
+        isMerged: true,
+      };
+      mergedNodes.push(mergedNode);
+      memberIds.forEach((id) => idMapping.set(id, mergedNode.id));
+    }
+  });
+
+  const mergedNodeIds = new Set(mergedNodes.map((n) => n.id));
+
+  // Transform links, remapping IDs and removing duplicate-type links
+  const nonDuplicateLinks = libraryData.links.filter(
+    (link) => link.content.link_type !== "duplicate"
+  );
+
+  const linksWithRemappedIds: Link[] = nonDuplicateLinks
+    .map((link) => ({
+      source: idMapping.get(link.from_id) || link.from_id,
+      target: idMapping.get(link.to_id) || link.to_id,
+      linkType: link.content.link_type,
+      linkCategory: link.content.link_category,
+      reasoning: link.content.reasoning,
+      strength: link.content.strength ?? null,
+    }))
+    .filter((link) => {
+      const src = link.source as string;
+      const tgt = link.target as string;
+      // Remove self-loops and ensure both nodes exist
+      return src !== tgt && mergedNodeIds.has(src) && mergedNodeIds.has(tgt);
+    });
+
+  // Deduplicate links (same source-target pair AND same link type)
+  const linkKey = (l: Link) => {
+    const src = typeof l.source === "string" ? l.source : l.source.id;
+    const tgt = typeof l.target === "string" ? l.target : l.target.id;
+    return `${src}->${tgt}:${l.linkType}`;
+  };
+  const seenLinks = new Set<string>();
+  const dedupedLinks: Link[] = [];
+  linksWithRemappedIds.forEach((link) => {
+    const key = linkKey(link);
+    const src = typeof link.source === "string" ? link.source : link.source.id;
+    const tgt = typeof link.target === "string" ? link.target : link.target.id;
+    const reverseKey = `${tgt}->${src}:${link.linkType}`;
+    if (!seenLinks.has(key) && !seenLinks.has(reverseKey)) {
+      seenLinks.add(key);
+      dedupedLinks.push(link);
+    }
+  });
+
+  return {
+    graphData: { nodes: mergedNodes, links: dedupedLinks },
+    papersMap,
+    methodsMap,
+  };
+}
+
+/**
+ * Get the color for a node based on its type.
+ */
+export function getNodeColor(node: Node): string {
+  if (node.type === "claim") return "#f97316"; // Orange for claims
+  if (node.type === "observation") return "#3b82f6"; // Blue for observations
+  return "#aaa";
+}
+
+/**
+ * Get display text for a node.
+ */
+export function getNodeLabelText(node: Node): string {
+  return node.displayText || node.id;
+}
+
+/**
+ * Compute counts for nodes and link types.
+ */
+export function computeGraphCounts(graphData: GraphData) {
+  const claims = graphData.nodes.filter((n) => n.type === "claim").length;
+  const observations = graphData.nodes.filter(
+    (n) => n.type === "observation"
+  ).length;
+
+  let premiseLinks = 0;
+  let variantLinks = 0;
+  let claimContradictsLinks = 0;
+  let supportsLinks = 0;
+  let contradictsLinks = 0;
+  let contextualizesLinks = 0;
+
+  graphData.links.forEach((link) => {
+    if (link.linkCategory === "claim_to_claim") {
+      if (link.linkType === "premise") premiseLinks++;
+      else if (link.linkType === "variant") variantLinks++;
+      else if (link.linkType === "contradiction") claimContradictsLinks++;
+    } else if (link.linkCategory === "claim_to_observation") {
+      if (link.linkType === "supports") supportsLinks++;
+      else if (link.linkType === "contradicts") contradictsLinks++;
+      else if (link.linkType === "contextualizes") contextualizesLinks++;
+    }
+  });
+
+  return {
+    claims,
+    observations,
+    premiseLinks,
+    variantLinks,
+    claimContradictsLinks,
+    supportsLinks,
+    contradictsLinks,
+    contextualizesLinks,
+  };
+}
+
+/**
+ * Compute evidence count for each claim node.
+ */
+export function computeClaimEvidenceCounts(
+  graphData: GraphData
+): Map<string, number> {
+  const counts = new Map<string, number>();
+
+  graphData.links.forEach((link) => {
+    if (link.linkCategory !== "claim_to_observation") return;
+    const src = typeof link.source === "object" ? link.source.id : link.source;
+    const tgt = typeof link.target === "object" ? link.target.id : link.target;
+
+    const srcNode = graphData.nodes.find((n) => n.id === src);
+    const tgtNode = graphData.nodes.find((n) => n.id === tgt);
+
+    if (srcNode?.type === "claim") {
+      counts.set(src, (counts.get(src) || 0) + 1);
+    }
+    if (tgtNode?.type === "claim") {
+      counts.set(tgt, (counts.get(tgt) || 0) + 1);
+    }
+  });
+
+  return counts;
+}
+
+/**
+ * Compute node IDs involved in contradiction links.
+ */
+export function computeContradictionNodeIds(
+  graphData: GraphData
+): Set<string> {
+  const nodeIds = new Set<string>();
+
+  graphData.links.forEach((link) => {
+    if (link.linkType === "contradiction" || link.linkType === "contradicts") {
+      const src =
+        typeof link.source === "object" ? link.source.id : link.source;
+      const tgt =
+        typeof link.target === "object" ? link.target.id : link.target;
+      nodeIds.add(src);
+      nodeIds.add(tgt);
+    }
+  });
+
+  return nodeIds;
+}
+
+/**
+ * Compute observation IDs linked to a specific claim.
+ */
+export function computeEvidenceObservationIds(
+  graphData: GraphData,
+  claimId: string
+): Set<string> {
+  const obsIds = new Set<string>();
+
+  graphData.links.forEach((link) => {
+    if (link.linkCategory !== "claim_to_observation") return;
+    const src = typeof link.source === "object" ? link.source.id : link.source;
+    const tgt = typeof link.target === "object" ? link.target.id : link.target;
+
+    if (src === claimId) obsIds.add(tgt);
+    else if (tgt === claimId) obsIds.add(src);
+  });
+
+  return obsIds;
+}
+
+/**
+ * Compute neighbor IDs of a node.
+ */
+export function computeNeighborNodeIds(
+  graphData: GraphData,
+  nodeId: string
+): Set<string> {
+  const neighbors = new Set<string>();
+
+  graphData.links.forEach((link) => {
+    const src = typeof link.source === "object" ? link.source.id : link.source;
+    const tgt = typeof link.target === "object" ? link.target.id : link.target;
+    if (src === nodeId) neighbors.add(tgt);
+    if (tgt === nodeId) neighbors.add(src);
+  });
+
+  return neighbors;
+}
