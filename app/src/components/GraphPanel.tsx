@@ -1,18 +1,18 @@
 import * as React from "react";
 import { useState, useMemo } from "react";
-import { Button } from "@/components/ui/button";
 import { KnowledgeGraph } from "./KnowledgeGraph";
+import { FilterPanel } from "./FilterPanel";
 import type { GraphData, Node, Link, GraphFilterState, GraphCounts } from "@/types/graph";
 import {
   computeGraphCounts,
   computeContradictionNodeIds,
   computeEvidenceObservationIds,
+  getLinkEndpoints,
 } from "@/lib/graph-utils";
 
 interface GraphPanelProps {
   graphData: GraphData | null;
   selectedNode: Node | null;
-  hoveredNode: Node | null;
   selectedLink: Link | null;
   hoveredLink: Link | null;
   showEvidenceForClaimId: string | null;
@@ -29,7 +29,6 @@ interface GraphPanelProps {
 export const GraphPanel: React.FC<GraphPanelProps> = ({
   graphData,
   selectedNode,
-  hoveredNode,
   selectedLink,
   hoveredLink,
   showEvidenceForClaimId,
@@ -102,8 +101,7 @@ export const GraphPanel: React.FC<GraphPanelProps> = ({
     const filteredNodeIds = new Set(filteredNodes.map((n) => n.id));
 
     const filteredLinks = graphData.links.filter((link) => {
-      const src = typeof link.source === "object" ? link.source.id : link.source;
-      const tgt = typeof link.target === "object" ? link.target.id : link.target;
+      const { src, tgt } = getLinkEndpoints(link);
       return filteredNodeIds.has(src) && filteredNodeIds.has(tgt);
     });
 
@@ -151,7 +149,6 @@ export const GraphPanel: React.FC<GraphPanelProps> = ({
         graphData={filteredGraphData}
         rawGraphData={graphData}
         selectedNode={selectedNode}
-        hoveredNode={hoveredNode}
         selectedLink={selectedLink}
         hoveredLink={hoveredLink}
         filterState={filterState}
@@ -163,153 +160,26 @@ export const GraphPanel: React.FC<GraphPanelProps> = ({
         onClearSelection={handleClearSelection}
       />
 
-      {/* Filter panel */}
-      <div className="absolute bottom-4 left-4 flex flex-col gap-3 bg-white rounded-lg p-4 shadow-lg border border-gray-200 min-w-[220px]">
-        {/* Header with counts */}
-        <div className="text-sm text-gray-600">
-          {counts.claims} claims and {counts.observations} evidence Nodes
-        </div>
-
-        {/* Highlight contradictions button */}
-        {counts.claimContradictsLinks + counts.contradictsLinks > 0 && (
-          <Button
-            size="sm"
-            variant={highlightContradictions ? "default" : "destructive"}
-            onClick={() => setHighlightContradictions(!highlightContradictions)}
-            className="w-full"
-          >
-            {highlightContradictions
-              ? "Highlighting Contradictions"
-              : "Highlight Contradictions"}{" "}
-            ({counts.claimContradictsLinks + counts.contradictsLinks})
-          </Button>
-        )}
-
-        {/* Filter section */}
-        <div className="flex flex-col gap-2">
-          <div className="text-sm font-medium text-gray-700">
-            Filter your graph
-          </div>
-
-          {/* Claims checkbox */}
-          <label className="flex items-center gap-2 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={showClaims}
-              onChange={() => setShowClaims(!showClaims)}
-              className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-            />
-            <span className="text-sm text-gray-700">
-              Claims ({counts.claims})
-            </span>
-          </label>
-
-          {/* Claims sub-options */}
-          <div className="ml-6 flex flex-col gap-1">
-            <label className="flex items-center gap-2 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={showPremiseLinks}
-                onChange={() => setShowPremiseLinks(!showPremiseLinks)}
-                disabled={!showClaims || highlightContradictions}
-                className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 disabled:opacity-50"
-              />
-              <span
-                className={`text-sm ${!showClaims || highlightContradictions ? "text-gray-400" : "text-gray-600"}`}
-              >
-                Premise connections ({counts.premiseLinks})
-              </span>
-            </label>
-            <label className="flex items-center gap-2 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={showClaimContradictsLinks}
-                onChange={() =>
-                  setShowClaimContradictsLinks(!showClaimContradictsLinks)
-                }
-                disabled={!showClaims || highlightContradictions}
-                className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 disabled:opacity-50"
-              />
-              <span
-                className={`text-sm ${!showClaims || highlightContradictions ? "text-gray-400" : "text-gray-600"}`}
-              >
-                Contradiction connections ({counts.claimContradictsLinks})
-              </span>
-            </label>
-          </div>
-
-          {/* Evidence checkbox */}
-          <label className="flex items-center gap-2 cursor-pointer mt-2">
-            <input
-              type="checkbox"
-              checked={showObservations}
-              onChange={() => onToggleObservations(!showObservations)}
-              className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-            />
-            <span className="text-sm text-gray-700">
-              Evidence ({counts.observations})
-            </span>
-          </label>
-
-          {/* Evidence sub-options */}
-          <div className="ml-6 flex flex-col gap-1">
-            <label className="flex items-center gap-2 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={showSupportsLinks}
-                onChange={() => setShowSupportsLinks(!showSupportsLinks)}
-                disabled={!showObservations || highlightContradictions}
-                className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 disabled:opacity-50"
-              />
-              <span
-                className={`text-sm ${!showObservations || highlightContradictions ? "text-gray-400" : "text-gray-600"}`}
-              >
-                Supports ({counts.supportsLinks})
-              </span>
-            </label>
-            <label className="flex items-center gap-2 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={showContradictsLinks}
-                onChange={() => setShowContradictsLinks(!showContradictsLinks)}
-                disabled={!showObservations || highlightContradictions}
-                className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 disabled:opacity-50"
-              />
-              <span
-                className={`text-sm ${!showObservations || highlightContradictions ? "text-gray-400" : "text-gray-600"}`}
-              >
-                Contradicts ({counts.contradictsLinks})
-              </span>
-            </label>
-            <label className="flex items-center gap-2 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={showContextualizesLinks}
-                onChange={() =>
-                  setShowContextualizesLinks(!showContextualizesLinks)
-                }
-                disabled={!showObservations || highlightContradictions}
-                className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 disabled:opacity-50"
-              />
-              <span
-                className={`text-sm ${!showObservations || highlightContradictions ? "text-gray-400" : "text-gray-600"}`}
-              >
-                Contextualizes ({counts.contextualizesLinks})
-              </span>
-            </label>
-          </div>
-        </div>
-
-        {/* Reset button */}
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={() => window.location.reload()}
-          className="w-full"
-        >
-          Reset Graph
-        </Button>
-      </div>
+      <FilterPanel
+        counts={counts}
+        showClaims={showClaims}
+        showObservations={showObservations}
+        showPremiseLinks={showPremiseLinks}
+        showClaimContradictsLinks={showClaimContradictsLinks}
+        showSupportsLinks={showSupportsLinks}
+        showContradictsLinks={showContradictsLinks}
+        showContextualizesLinks={showContextualizesLinks}
+        highlightContradictions={highlightContradictions}
+        onToggleClaims={() => setShowClaims(!showClaims)}
+        onToggleObservations={() => onToggleObservations(!showObservations)}
+        onTogglePremiseLinks={() => setShowPremiseLinks(!showPremiseLinks)}
+        onToggleClaimContradictsLinks={() => setShowClaimContradictsLinks(!showClaimContradictsLinks)}
+        onToggleSupportsLinks={() => setShowSupportsLinks(!showSupportsLinks)}
+        onToggleContradictsLinks={() => setShowContradictsLinks(!showContradictsLinks)}
+        onToggleContextualizesLinks={() => setShowContextualizesLinks(!showContextualizesLinks)}
+        onToggleHighlightContradictions={() => setHighlightContradictions(!highlightContradictions)}
+        onReset={() => window.location.reload()}
+/>
     </div>
   );
 };

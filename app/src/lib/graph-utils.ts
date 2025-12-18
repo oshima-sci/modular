@@ -2,6 +2,17 @@ import type { LibraryData } from "@/hooks/useLibrary";
 import type { Node, Link, GraphData, Paper, Method } from "@/types/graph";
 
 /**
+ * Safely extract node ID from a link endpoint.
+ * Handles string, number, object, and undefined forms from react-force-graph-2d.
+ */
+function getNodeId(endpoint: Link["source"] | Link["target"]): string {
+  if (endpoint === undefined || endpoint === null) return "";
+  if (typeof endpoint === "string") return endpoint;
+  if (typeof endpoint === "number") return String(endpoint);
+  return endpoint.id ?? "";
+}
+
+/**
  * Transform library data into graph data with merged duplicate nodes.
  * Uses union-find to group duplicates and deduplicates links.
  */
@@ -165,16 +176,16 @@ export function transformLibraryToGraphData(libraryData: LibraryData): {
 
   // Deduplicate links (same source-target pair AND same link type)
   const linkKey = (l: Link) => {
-    const src = typeof l.source === "string" ? l.source : l.source.id;
-    const tgt = typeof l.target === "string" ? l.target : l.target.id;
+    const src = getNodeId(l.source);
+    const tgt = getNodeId(l.target);
     return `${src}->${tgt}:${l.linkType}`;
   };
   const seenLinks = new Set<string>();
   const dedupedLinks: Link[] = [];
   linksWithRemappedIds.forEach((link) => {
     const key = linkKey(link);
-    const src = typeof link.source === "string" ? link.source : link.source.id;
-    const tgt = typeof link.target === "string" ? link.target : link.target.id;
+    const src = getNodeId(link.source);
+    const tgt = getNodeId(link.target);
     const reverseKey = `${tgt}->${src}:${link.linkType}`;
     if (!seenLinks.has(key) && !seenLinks.has(reverseKey)) {
       seenLinks.add(key);
@@ -294,8 +305,8 @@ export function computeClaimEvidenceCounts(
 
   graphData.links.forEach((link) => {
     if (link.linkCategory !== "claim_to_observation") return;
-    const src = typeof link.source === "object" ? link.source.id : link.source;
-    const tgt = typeof link.target === "object" ? link.target.id : link.target;
+    const src = getNodeId(link.source);
+    const tgt = getNodeId(link.target);
 
     const srcNode = graphData.nodes.find((n) => n.id === src);
     const tgtNode = graphData.nodes.find((n) => n.id === tgt);
@@ -321,10 +332,10 @@ export function computeContradictionNodeIds(
 
   graphData.links.forEach((link) => {
     if (isContradictionLink(link)) {
-      const src = typeof link.source === "object" ? link.source.id : link.source;
-      const tgt = typeof link.target === "object" ? link.target.id : link.target;
-      nodeIds.add(src);
-      nodeIds.add(tgt);
+      const src = getNodeId(link.source);
+      const tgt = getNodeId(link.target);
+      if (src) nodeIds.add(src);
+      if (tgt) nodeIds.add(tgt);
     }
   });
 
@@ -342,11 +353,11 @@ export function computeEvidenceObservationIds(
 
   graphData.links.forEach((link) => {
     if (link.linkCategory !== "claim_to_observation") return;
-    const src = typeof link.source === "object" ? link.source.id : link.source;
-    const tgt = typeof link.target === "object" ? link.target.id : link.target;
+    const src = getNodeId(link.source);
+    const tgt = getNodeId(link.target);
 
-    if (src === claimId) obsIds.add(tgt);
-    else if (tgt === claimId) obsIds.add(src);
+    if (src === claimId && tgt) obsIds.add(tgt);
+    else if (tgt === claimId && src) obsIds.add(src);
   });
 
   return obsIds;
@@ -362,10 +373,10 @@ export function computeNeighborNodeIds(
   const neighbors = new Set<string>();
 
   graphData.links.forEach((link) => {
-    const src = typeof link.source === "object" ? link.source.id : link.source;
-    const tgt = typeof link.target === "object" ? link.target.id : link.target;
-    if (src === nodeId) neighbors.add(tgt);
-    if (tgt === nodeId) neighbors.add(src);
+    const src = getNodeId(link.source);
+    const tgt = getNodeId(link.target);
+    if (src === nodeId && tgt) neighbors.add(tgt);
+    if (tgt === nodeId && src) neighbors.add(src);
   });
 
   return neighbors;

@@ -1,7 +1,10 @@
 import { useQuery } from "@tanstack/react-query";
-import type { LinkCategory, LinkType } from "@/types/graph";
 
 const API_URL = import.meta.env.VITE_API_URL;
+
+// Link types from API
+type LinkType = "duplicate" | "variant" | "contradiction" | "premise" | "supports" | "contradicts" | "contextualizes";
+type LinkCategory = "claim_to_claim" | "claim_to_observation";
 
 // Types matching the API response
 export interface LibraryPaper {

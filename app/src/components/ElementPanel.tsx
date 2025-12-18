@@ -134,28 +134,39 @@ const EvidenceDistributionBar: React.FC<EvidenceDistributionBarProps> = ({ count
   if (counts.total === 0) return null;
 
   return (
-    <>
-      <div className="flex-1 h-2 rounded-full overflow-hidden flex">
-        {counts.supports > 0 && (
-          <div
-            className="bg-green-500 h-full"
-            style={{ width: `${(counts.supports / counts.total) * 100}%` }}
-          />
-        )}
-        {counts.contradicts > 0 && (
-          <div
-            className="bg-red-500 h-full"
-            style={{ width: `${(counts.contradicts / counts.total) * 100}%` }}
-          />
-        )}
-        {counts.contextualizes > 0 && (
-          <div
-            className="bg-gray-400 h-full"
-            style={{ width: `${(counts.contextualizes / counts.total) * 100}%` }}
-          />
-        )}
+    <div className="flex-1 flex flex-col gap-1">
+      <div className="flex flex-row gap-2 items-center">
+
+        {/* Total count badge */}
+        <div className="text-xs font-medium text-gray-600 bg-gray-100 px-2 py-1 rounded">
+            {counts.total}
+        </div>
+
+        {/* Distribution Bar */}
+        <div className="w-full h-2 rounded-full overflow-hidden flex">
+          {counts.supports > 0 && (
+            <div
+              className="bg-green-500 h-full"
+              style={{ width: `${(counts.supports / counts.total) * 100}%` }}
+            />
+          )}
+          {counts.contradicts > 0 && (
+            <div
+              className="bg-red-500 h-full"
+              style={{ width: `${(counts.contradicts / counts.total) * 100}%` }}
+            />
+          )}
+          {counts.contextualizes > 0 && (
+            <div
+              className="bg-gray-400 h-full"
+              style={{ width: `${(counts.contextualizes / counts.total) * 100}%` }}
+            />
+          )}
+        </div>
       </div>
-      <div className="flex gap-4 mt-1 text-[10px] text-gray-500">
+
+      {/* Legend */}
+      <div className="flex gap-4 ml-1 text-[10px] text-gray-500">
         {counts.supports > 0 && (
           <span className="flex items-center gap-1">
             <span className="w-2 h-2 rounded-full bg-green-500" />
@@ -175,7 +186,7 @@ const EvidenceDistributionBar: React.FC<EvidenceDistributionBarProps> = ({ count
           </span>
         )}
       </div>
-    </>
+    </div>
   );
 };
 
@@ -210,36 +221,35 @@ const EvidenceLandscape: React.FC<EvidenceLandscapeProps> = ({
     }
   };
 
+  // Compute paper source copy
+  const paperSourceCopy = (() => {
+    if (evidenceData.methodCount === 0) return null;
+
+    const { methodPaperCount, methodPaperIds } = evidenceData;
+    const claimPaperIds = new Set(node.paperIds);
+    const allFromSamePaper = methodPaperCount === 1 &&
+      Array.from(methodPaperIds).every(id => claimPaperIds.has(id));
+
+    if (allFromSamePaper) {
+      return "from the same paper";
+    } else if (methodPaperCount === 1) {
+      return "from 1 paper";
+    } else {
+      return `across ${methodPaperCount} papers`;
+    }
+  })();
+
   return (
     <>
       {/* Evidence Landscape Stats */}
       <div>
         <h5 className="mb-2">Evidence Landscape</h5>
-        <div className="flex items-center gap-2">
-          <span className="text-xs font-medium text-gray-600 bg-gray-100 px-2 py-1 rounded">
-            {evidenceData.counts.total}
-          </span>
-          <EvidenceDistributionBar counts={evidenceData.counts} />
-        </div>
+        <EvidenceDistributionBar counts={evidenceData.counts} />
         {evidenceData.methodCount > 0 && (
           <p className="mt-2 text-xs text-gray-500">
             from {evidenceData.methodCount}{" "}
-            {evidenceData.methodCount === 1 ? "method" : "methods"}
-            {evidenceData.methodPaperCount > 1 ? (
-              <>
-                {" "}
-                <span className="font-semibold text-gray-800">
-                  across {evidenceData.methodPaperCount} papers
-                </span>
-              </>
-            ) : evidenceData.methodPaperCount === 1 &&
-              node.paperIds.length === 1 &&
-              evidenceData.methodPaperIds.has(node.paperIds[0]) ? (
-              <>
-                {" "}
-                from the <span className="font-semibold">same paper as the claim</span>
-              </>
-            ) : null}
+            {evidenceData.methodCount === 1 ? "method" : "methods"}{" "}
+            <span className="font-semibold text-gray-800">{paperSourceCopy}</span>
           </p>
         )}
         {evidenceData.counts.total > 0 && !allObservationsVisible && (

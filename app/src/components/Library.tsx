@@ -105,7 +105,6 @@ export default function Library() {
           <GraphPanel
             graphData={graphData}
             selectedNode={selectedNode}
-            hoveredNode={hoveredNode}
             selectedLink={selectedLink}
             hoveredLink={hoveredLink}
             showEvidenceForClaimId={showEvidenceForClaimId}
