@@ -33,4 +33,8 @@ Thumbs.db
 # Logs
 *.log
 
+# Test outputs and data files
+*.csv
+*.tei
+
 /temp

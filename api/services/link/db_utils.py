@@ -1,4 +1,4 @@
-"""Shared utilities for saving links to database."""
+"""Shared utilities for data validation and transformation before saving to database."""
 import logging
 import re
 

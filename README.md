@@ -19,8 +19,6 @@ An app for researchers to upload papers and receive a cross-linked map of claims
 
 We're using jobs on the DB and parallel workers to make this more efficient.
 
-Ensure code is developed in tiny, modular pieces that are testable independent of the rest of the pipeline.
-
 ## Structure
 
 ```
