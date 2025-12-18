@@ -22,9 +22,7 @@ This will:
 ## Monitor Logs
 
 ```bash
-# Live logs (API + workers)
-oshi listen
-# or
+# Live log alias (API + workers)
 ssh oshima 'journalctl -u oshi-api -f'
 
 # Last 100 lines

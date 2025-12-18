@@ -1,7 +1,8 @@
-import * as React from "react";
 import { useEffect, useRef, useState, useMemo } from "react";
 import ForceGraph2D, { type ForceGraphMethods } from "react-force-graph-2d";
 import type { GraphData, Node, Link, GraphFilterState } from "@/types/graph";
+
+type GraphRef = ForceGraphMethods<Node, Link>;
 import {
   getNodeColor,
   getNodeLabelText,
@@ -35,7 +36,6 @@ export const KnowledgeGraph: React.FC<KnowledgeGraphProps> = ({
   graphData,
   rawGraphData,
   selectedNode,
-  hoveredNode,
   selectedLink,
   hoveredLink,
   filterState,
@@ -46,7 +46,7 @@ export const KnowledgeGraph: React.FC<KnowledgeGraphProps> = ({
   onLinkHover,
   onClearSelection,
 }) => {
-  const fgRef = useRef<ForceGraphMethods | undefined>(undefined);
+  const fgRef = useRef<GraphRef | undefined>(undefined);
   const containerRef = useRef<HTMLDivElement>(null);
   const [dimensions, setDimensions] = useState({ width: 800, height: 600 });
 
@@ -82,20 +82,12 @@ export const KnowledgeGraph: React.FC<KnowledgeGraphProps> = ({
     return computeNeighborNodeIds(graphData, selectedNode.id);
   }, [graphData, selectedNode]);
 
-  // Force a refresh when selection changes
-  useEffect(() => {
-    (fgRef.current as any)?.refresh?.();
-  }, [selectedNode, neighborNodeIds, selectedLink]);
-
-  // Refresh on hover change
-  useEffect(() => {
-    (fgRef.current as any)?.refresh?.();
-  }, [hoveredNode, hoveredLink]);
-
   // Configure link distances
   useEffect(() => {
     if (fgRef.current) {
-      fgRef.current.d3Force("link")?.distance((link: any) => {
+      const linkForce = fgRef.current.d3Force("link");
+      // d3 force link.distance accepts a function with the link as argument
+      (linkForce as { distance?: (fn: (link: Link) => number) => void })?.distance?.((link: Link) => {
         if (link.linkType === "variant") {
           return DEFAULT_LINK_DISTANCE * VARIANT_DISTANCE_MULTIPLIER;
         }
@@ -121,60 +113,56 @@ export const KnowledgeGraph: React.FC<KnowledgeGraphProps> = ({
   }, [graphData]);
 
   // Event handlers
-  const handleNodeClick = (node: any) => {
-    const n = node as Node;
+  const handleNodeClick = (node: Node) => {
     if (
       filterState.highlightContradictions &&
-      !contradictionNodeIds.has(n.id)
+      !contradictionNodeIds.has(node.id)
     ) {
       return;
     }
-    onNodeSelect(n);
+    onNodeSelect(node);
     onLinkSelect(null);
   };
 
-  const handleLinkClick = (link: any) => {
-    const l = link as Link;
+  const handleLinkClick = (link: Link) => {
     if (
       filterState.highlightContradictions &&
-      l.linkType !== "contradiction" &&
-      l.linkType !== "contradicts"
+      link.linkType !== "contradiction" &&
+      link.linkType !== "contradicts"
     ) {
       return;
     }
-    onLinkSelect(l);
+    onLinkSelect(link);
     onNodeSelect(null);
   };
 
-  const handleNodeHover = (node: any) => {
-    const n = node as Node | null;
+  const handleNodeHover = (node: Node | null) => {
     if (
       filterState.highlightContradictions &&
-      n &&
-      !contradictionNodeIds.has(n.id)
+      node &&
+      !contradictionNodeIds.has(node.id)
     ) {
       return;
     }
-    onNodeHover(n);
-    if (n) onLinkHover(null);
+    onNodeHover(node);
+    if (node) onLinkHover(null);
   };
 
-  const handleLinkHover = (link: any) => {
-    const l = link as Link | null;
+  const handleLinkHover = (link: Link | null) => {
     if (
       filterState.highlightContradictions &&
-      l &&
-      l.linkType !== "contradiction" &&
-      l.linkType !== "contradicts"
+      link &&
+      link.linkType !== "contradiction" &&
+      link.linkType !== "contradicts"
     ) {
       return;
     }
-    onLinkHover(l);
-    if (l) onNodeHover(null);
+    onLinkHover(link);
+    if (link) onNodeHover(null);
   };
 
   // Link color function
-  const linkColor = (link: any) => {
+  const linkColor = (link: Link) => {
     // Check if link type is hidden
     if (link.linkCategory === "claim_to_claim") {
       if (link.linkType === "premise" && !filterState.showPremiseLinks)
@@ -240,6 +228,10 @@ export const KnowledgeGraph: React.FC<KnowledgeGraphProps> = ({
           ? activeLink!.target.id
           : activeLink!.target;
       if (src === activeSrc && tgt === activeTgt) return "#3b82f6";
+      // If a node is selected, hide links outside its neighborhood
+      if (selectedNode && src !== selectedNode.id && tgt !== selectedNode.id) {
+        return "transparent";
+      }
       return "#ddd";
     }
 
@@ -255,7 +247,7 @@ export const KnowledgeGraph: React.FC<KnowledgeGraphProps> = ({
   };
 
   // Link width function
-  const linkWidth = (link: any) => {
+  const linkWidth = (link: Link) => {
     const src = typeof link.source === "object" ? link.source.id : link.source;
     const tgt = typeof link.target === "object" ? link.target.id : link.target;
 
@@ -298,29 +290,28 @@ export const KnowledgeGraph: React.FC<KnowledgeGraphProps> = ({
   };
 
   // Node canvas rendering
-  const nodeCanvasObject = (node: any, ctx: CanvasRenderingContext2D) => {
-    const n = node as Node;
-    const nodeSize = selectedNode && n.id === selectedNode.id ? 9 : 6;
+  const nodeCanvasObject = (node: Node, ctx: CanvasRenderingContext2D) => {
+    const nodeSize = selectedNode && node.id === selectedNode.id ? 9 : 6;
 
     let isRelated = true;
     if (filterState.highlightContradictions) {
-      isRelated = contradictionNodeIds.has(n.id);
+      isRelated = contradictionNodeIds.has(node.id);
     } else if (selectedNode) {
-      isRelated = n.id === selectedNode.id || neighborNodeIds.has(n.id);
+      isRelated = node.id === selectedNode.id || neighborNodeIds.has(node.id);
     }
 
     ctx.globalAlpha = isRelated ? 1 : 0.5;
-    const color = isRelated ? getNodeColor(n) : "#ddd";
+    const color = isRelated ? getNodeColor(node) : "#ddd";
 
     // Draw main node circle
     ctx.beginPath();
-    ctx.arc(node.x, node.y, nodeSize, 0, 2 * Math.PI);
+    ctx.arc(node.x!, node.y!, nodeSize, 0, 2 * Math.PI);
     ctx.fillStyle = color;
     ctx.fill();
 
     // For claim nodes with evidence, draw pill badge
-    if (n.type === "claim") {
-      const evidenceCount = claimEvidenceCounts.get(n.id) || 0;
+    if (node.type === "claim") {
+      const evidenceCount = claimEvidenceCounts.get(node.id) || 0;
       if (evidenceCount > 0) {
         const label = `${evidenceCount} EV`;
         const fontSize = 4;
@@ -333,8 +324,8 @@ export const KnowledgeGraph: React.FC<KnowledgeGraphProps> = ({
         const badgeHeight = fontSize + paddingY * 2;
         const offsetX = nodeSize * 0.5;
         const offsetY = nodeSize * 0.5;
-        const badgeX = node.x + offsetX;
-        const badgeY = node.y + offsetY - badgeHeight / 2;
+        const badgeX = node.x! + offsetX;
+        const badgeY = node.y! + offsetY - badgeHeight / 2;
         const borderRadius = badgeHeight / 2;
 
         ctx.beginPath();
@@ -345,7 +336,7 @@ export const KnowledgeGraph: React.FC<KnowledgeGraphProps> = ({
         ctx.textAlign = "left";
         ctx.textBaseline = "middle";
         ctx.fillStyle = "#fff";
-        ctx.fillText(label, badgeX + paddingX, node.y + offsetY);
+        ctx.fillText(label, badgeX + paddingX, node.y! + offsetY);
       }
     }
 
@@ -354,21 +345,20 @@ export const KnowledgeGraph: React.FC<KnowledgeGraphProps> = ({
 
   // Node pointer area
   const nodePointerAreaPaint = (
-    node: any,
+    node: Node,
     color: string,
     ctx: CanvasRenderingContext2D
   ) => {
-    const n = node as Node;
-    const nodeSize = selectedNode && n.id === selectedNode.id ? 9 : 6;
+    const nodeSize = selectedNode && node.id === selectedNode.id ? 9 : 6;
     ctx.beginPath();
-    ctx.arc(node.x, node.y, nodeSize, 0, 2 * Math.PI);
+    ctx.arc(node.x!, node.y!, nodeSize, 0, 2 * Math.PI);
     ctx.fillStyle = color;
     ctx.fill();
   };
 
   // Link pointer area
   const linkPointerAreaPaint = (
-    link: any,
+    link: Link,
     invisibleColor: string,
     ctx: CanvasRenderingContext2D
   ) => {
@@ -393,9 +383,21 @@ export const KnowledgeGraph: React.FC<KnowledgeGraphProps> = ({
         return;
     }
 
+    // Don't paint pointer area for links outside selected neighborhood
+    if (selectedNode) {
+      const src = typeof link.source === "object" ? link.source.id : link.source;
+      const tgt = typeof link.target === "object" ? link.target.id : link.target;
+      const srcInNeighborhood = src === selectedNode.id || neighborNodeIds.has(src as string);
+      const tgtInNeighborhood = tgt === selectedNode.id || neighborNodeIds.has(tgt as string);
+      // Only paint if both ends are in the neighborhood AND at least one is the selected node
+      if (!(srcInNeighborhood && tgtInNeighborhood && (src === selectedNode.id || tgt === selectedNode.id))) return;
+    }
+
     const start = link.source;
     const end = link.target;
     if (typeof start !== "object" || typeof end !== "object") return;
+    if (start.x === undefined || start.y === undefined) return;
+    if (end.x === undefined || end.y === undefined) return;
 
     ctx.strokeStyle = invisibleColor;
     ctx.lineWidth = 6;
@@ -426,23 +428,22 @@ export const KnowledgeGraph: React.FC<KnowledgeGraphProps> = ({
         nodeAutoColorBy="type"
         linkColor={linkColor}
         linkWidth={linkWidth}
-        nodeLabel={selectedNode ? (node: any) => getNodeLabelText(node as Node) : ""}
+        nodeLabel={selectedNode ? (node: Node) => getNodeLabelText(node) : ""}
         onNodeClick={handleNodeClick}
         onNodeHover={handleNodeHover}
         onLinkClick={handleLinkClick}
         onLinkHover={handleLinkHover}
         onBackgroundClick={onClearSelection}
-        nodeColor={(node: any) => getNodeColor(node as Node)}
-        nodeVal={(node: any) => {
-          const n = node as Node;
-          if (selectedNode && n.id === selectedNode.id) {
+        nodeColor={(node: Node) => getNodeColor(node)}
+        nodeVal={(node: Node) => {
+          if (selectedNode && node.id === selectedNode.id) {
             return 4.5;
           }
           return 1;
         }}
         backgroundColor="#f8fafc"
         nodeRelSize={6}
-        linkDirectionalArrowLength={(link: any) =>
+        linkDirectionalArrowLength={(link: Link) =>
           link.linkType === "premise" || link.linkType === "contradiction"
             ? 5
             : 0

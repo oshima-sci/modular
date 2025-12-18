@@ -1,28 +1,30 @@
-// Graph node types
-export interface Node {
+import type { NodeObject, LinkObject } from "react-force-graph-2d";
+
+// Base node data (without force-graph positioning)
+export interface NodeData {
   id: string;
   type: "claim" | "observation";
   displayText: string;
-  rawContent: any;
+  rawContent: Record<string, unknown>;
   paperIds: string[];
   sourceElementIds: string[];
   observationType?: string;
   methodReference?: string;
   mergedNodeIds?: string[];
   isMerged?: boolean;
-  // Force graph positioning (added by react-force-graph)
-  x?: number;
-  y?: number;
 }
 
-export interface Link {
-  source: string | Node;
-  target: string | Node;
+// Base link data (without force-graph source/target objects)
+export interface LinkData {
   linkType: string;
   linkCategory: string;
   reasoning: string;
   strength: number | null;
 }
+
+// Force-graph enhanced types
+export type Node = NodeObject<NodeData>;
+export type Link = LinkObject<NodeData, LinkData>;
 
 export interface GraphData {
   nodes: Node[];
