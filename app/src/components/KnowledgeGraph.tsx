@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState, useMemo } from "react";
 import ForceGraph2D, { type ForceGraphMethods } from "react-force-graph-2d";
 import type { GraphData, Node, Link, GraphFilterState } from "@/types/graph";
-import { LINK_CATEGORIES, CLAIM_LINK_TYPES, EVIDENCE_LINK_TYPES } from "@/types/graph";
 import {
   GRAPH_COLORS,
   getNodeColor,
@@ -46,14 +45,14 @@ function getNodeVal(node: Node, selectedNodeId: string | null): number {
 
 // Check if a link is filtered out by the current filter toggles
 function isLinkFilteredOut(link: Link, filterState: GraphFilterState): boolean {
-  if (link.linkCategory === LINK_CATEGORIES.CLAIM_TO_CLAIM) {
-    if (link.linkType === CLAIM_LINK_TYPES.PREMISE && !filterState.showPremiseLinks) return true;
-    if (link.linkType === CLAIM_LINK_TYPES.VARIANT && !filterState.showVariantLinks) return true;
-    if (link.linkType === CLAIM_LINK_TYPES.CONTRADICTION && !filterState.showClaimContradictsLinks) return true;
-  } else if (link.linkCategory === LINK_CATEGORIES.CLAIM_TO_OBSERVATION) {
-    if (link.linkType === EVIDENCE_LINK_TYPES.SUPPORTS && !filterState.showSupportsLinks) return true;
-    if (link.linkType === EVIDENCE_LINK_TYPES.CONTRADICTS && !filterState.showContradictsLinks) return true;
-    if (link.linkType === EVIDENCE_LINK_TYPES.CONTEXTUALIZES && !filterState.showContextualizesLinks) return true;
+  if (link.linkCategory === "claim_to_claim") {
+    if (link.linkType === "premise" && !filterState.showPremiseLinks) return true;
+    if (link.linkType === "variant" && !filterState.showVariantLinks) return true;
+    if (link.linkType === "contradiction" && !filterState.showClaimContradictsLinks) return true;
+  } else if (link.linkCategory === "claim_to_observation") {
+    if (link.linkType === "supports" && !filterState.showSupportsLinks) return true;
+    if (link.linkType === "contradicts" && !filterState.showContradictsLinks) return true;
+    if (link.linkType === "contextualizes" && !filterState.showContextualizesLinks) return true;
   }
   return false;
 }
@@ -205,13 +204,13 @@ export const KnowledgeGraph: React.FC<KnowledgeGraphProps> = ({
       const linkForce = fgRef.current.d3Force("link");
       // d3 force link.distance accepts a function with the link as argument
       (linkForce as { distance?: (fn: (link: Link) => number) => void })?.distance?.((link: Link) => {
-        if (link.linkType === CLAIM_LINK_TYPES.VARIANT) {
+        if (link.linkType === "variant") {
           return DEFAULT_LINK_DISTANCE * VARIANT_DISTANCE_MULTIPLIER;
         }
 
         if (
-          link.linkType === CLAIM_LINK_TYPES.PREMISE &&
-          link.linkCategory === LINK_CATEGORIES.CLAIM_TO_CLAIM
+          link.linkType === "premise" &&
+          link.linkCategory === "claim_to_claim"
         ) {
           const strength = link.strength;
           if (strength !== null && strength !== undefined) {
@@ -273,13 +272,13 @@ export const KnowledgeGraph: React.FC<KnowledgeGraphProps> = ({
 
     const getBaseColor = () => {
       if (isContradictionLink(link)) return GRAPH_COLORS.contradiction;
-      if (link.linkType === EVIDENCE_LINK_TYPES.SUPPORTS) return GRAPH_COLORS.supports;
+      if (link.linkType === "supports") return GRAPH_COLORS.supports;
       return GRAPH_COLORS.default;
     };
 
     if (isActiveLink(link, activeLink)) return GRAPH_COLORS.active;
     if (activeLink) return GRAPH_COLORS.muted;
-    if (selectedNode && link.linkCategory === LINK_CATEGORIES.CLAIM_TO_CLAIM) return GRAPH_COLORS.claim;
+    if (selectedNode && link.linkCategory === "claim_to_claim") return GRAPH_COLORS.claim;
 
     return getBaseColor();
   };
@@ -292,13 +291,13 @@ export const KnowledgeGraph: React.FC<KnowledgeGraphProps> = ({
     if (isActiveLink(link, activeLink)) return 3;
     if (filterState.highlightContradictions && isContradictionLink(link)) return 2.5;
 
-    if (filterState.showEvidenceForClaimId && link.linkCategory === LINK_CATEGORIES.CLAIM_TO_OBSERVATION) {
+    if (filterState.showEvidenceForClaimId && link.linkCategory === "claim_to_observation") {
       if (src === filterState.showEvidenceForClaimId || tgt === filterState.showEvidenceForClaimId) {
         return 2.5;
       }
     }
 
-    if (selectedNode && link.linkCategory === LINK_CATEGORIES.CLAIM_TO_CLAIM) {
+    if (selectedNode && link.linkCategory === "claim_to_claim") {
       if (src === selectedNode.id || tgt === selectedNode.id) return 2.5;
     }
 
@@ -356,7 +355,7 @@ export const KnowledgeGraph: React.FC<KnowledgeGraphProps> = ({
         backgroundColor={GRAPH_COLORS.canvas}
         nodeRelSize={6}
         linkDirectionalArrowLength={(link: Link) =>
-          link.linkType === CLAIM_LINK_TYPES.PREMISE || link.linkType === CLAIM_LINK_TYPES.CONTRADICTION
+          link.linkType === "premise" || link.linkType === "contradiction"
             ? 5
             : 0
         }

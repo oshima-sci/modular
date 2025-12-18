@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import type { LinkCategory, LinkType } from "@/types/graph";
 
 const API_URL = import.meta.env.VITE_API_URL;
 
@@ -43,8 +44,8 @@ export interface ExtractLink {
   from_id: string;
   to_id: string;
   content: {
-    link_type: string;
-    link_category: string;
+    link_type: LinkType | "duplicate";
+    link_category: LinkCategory;
     reasoning: string;
     strength: number | null;
   };

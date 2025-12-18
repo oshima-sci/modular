@@ -1,7 +1,7 @@
 import * as React from "react";
 import PdfViewer, { type BBox } from "@/components/PdfViewer";
 import type { Paper } from "@/types/graph";
-import { getPdfUrl } from "@/lib/graph-utils";
+import { getPdfUrl } from "@/lib/pdf-utils";
 
 interface SourcePanelProps {
   paperId: string;

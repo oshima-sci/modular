@@ -1,6 +1,6 @@
 import { useState, useCallback } from "react";
 import type { BBox } from "@/components/PdfViewer";
-import { getTeiUrl, parseAllTeiBboxes } from "@/lib/graph-utils";
+import { getTeiUrl, parseAllTeiBboxes } from "@/lib/pdf-utils";
 
 interface UseSourceLoaderResult {
   loading: boolean;

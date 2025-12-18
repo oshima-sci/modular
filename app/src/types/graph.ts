@@ -1,34 +1,5 @@
 import type { NodeObject, LinkObject } from "react-force-graph-2d";
 
-// Link categories
-export const LINK_CATEGORIES = {
-  CLAIM_TO_CLAIM: "claim_to_claim",
-  CLAIM_TO_OBSERVATION: "claim_to_observation",
-} as const;
-
-export type LinkCategory = (typeof LINK_CATEGORIES)[keyof typeof LINK_CATEGORIES];
-
-// Claim-to-claim link types
-export const CLAIM_LINK_TYPES = {
-  PREMISE: "premise",
-  VARIANT: "variant",
-  CONTRADICTION: "contradiction",
-} as const;
-
-export type ClaimLinkType = (typeof CLAIM_LINK_TYPES)[keyof typeof CLAIM_LINK_TYPES];
-
-// Claim-to-observation (evidence) link types
-export const EVIDENCE_LINK_TYPES = {
-  SUPPORTS: "supports",
-  CONTRADICTS: "contradicts",
-  CONTEXTUALIZES: "contextualizes",
-} as const;
-
-export type EvidenceLinkType = (typeof EVIDENCE_LINK_TYPES)[keyof typeof EVIDENCE_LINK_TYPES];
-
-// Union type for any link type
-export type LinkType = ClaimLinkType | EvidenceLinkType;
-
 // Base node data (without force-graph positioning)
 export interface NodeData {
   id: string;
@@ -45,8 +16,8 @@ export interface NodeData {
 
 // Base link data (without force-graph source/target objects)
 export interface LinkData {
-  linkType: LinkType;
-  linkCategory: LinkCategory;
+  linkType: string;
+  linkCategory: string;
   reasoning: string;
   strength: number | null;
 }
@@ -94,7 +65,7 @@ export interface Method {
 // Evidence types for claim details
 export interface EvidenceItem {
   node: Node;
-  linkType: EvidenceLinkType;
+  linkType: string;
   reasoning: string;
 }
 
