@@ -286,12 +286,42 @@ export function transformLibraryToGraphData(libraryData: LibraryData): {
 }
 
 /**
+ * Check if a link is a contradiction type (either claim-to-claim or claim-to-observation).
+ */
+export function isContradictionLink(link: Link): boolean {
+  return link.linkType === "contradiction" || link.linkType === "contradicts";
+}
+
+/**
+ * Graph colors (hex values matching Tailwind palette for canvas rendering).
+ * Keep in sync with Tailwind classes used in ElementPanel.tsx.
+ */
+export const GRAPH_COLORS = {
+  // Node types
+  claim: "#f97316",        // orange-500 (bg-orange-50, text-orange-900 in UI)
+  observation: "#3b82f6",  // blue-500 (bg-blue-50, text-blue-900 in UI)
+
+  // Link types
+  contradiction: "#ef4444", // red-500
+  supports: "#22c55e",      // green-500
+  active: "#3b82f6",        // blue-500 (selected/hovered link)
+
+  // States
+  muted: "#ddd",            // inactive when something else is active
+  default: "#aaa",          // gray-400, default link color
+  badge: "#6b7280",         // gray-500, evidence badge background
+
+  // Background
+  canvas: "#f8fafc",        // slate-50
+} as const;
+
+/**
  * Get the color for a node based on its type.
  */
 export function getNodeColor(node: Node): string {
-  if (node.type === "claim") return "#f97316"; // Orange for claims
-  if (node.type === "observation") return "#3b82f6"; // Blue for observations
-  return "#aaa";
+  if (node.type === "claim") return GRAPH_COLORS.claim;
+  if (node.type === "observation") return GRAPH_COLORS.observation;
+  return GRAPH_COLORS.default;
 }
 
 /**
@@ -377,11 +407,9 @@ export function computeContradictionNodeIds(
   const nodeIds = new Set<string>();
 
   graphData.links.forEach((link) => {
-    if (link.linkType === "contradiction" || link.linkType === "contradicts") {
-      const src =
-        typeof link.source === "object" ? link.source.id : link.source;
-      const tgt =
-        typeof link.target === "object" ? link.target.id : link.target;
+    if (isContradictionLink(link)) {
+      const src = typeof link.source === "object" ? link.source.id : link.source;
+      const tgt = typeof link.target === "object" ? link.target.id : link.target;
       nodeIds.add(src);
       nodeIds.add(tgt);
     }
