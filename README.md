@@ -1,5 +1,7 @@
 # Modular 
 
+![Modular Screenshot](modular-keyframe.png)
+
 An app for researchers to upload papers and receive a cross-linked map of claims, methods, and observations from those papers.
 
 ## What it does
