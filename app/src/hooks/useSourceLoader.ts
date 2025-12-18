@@ -44,10 +44,6 @@ export function useSourceLoader(): UseSourceLoaderResult {
               ? parsedBboxes[0].id
               : null
         );
-
-        console.log(
-          `Loaded ${parsedBboxes.length} bboxes for paper: ${paperId}`
-        );
       } catch (err) {
         console.error("Failed to load source:", err);
         setCurrentPaperId(null);
