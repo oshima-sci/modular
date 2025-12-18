@@ -1,6 +1,6 @@
 import * as React from "react";
 import { useMemo } from "react";
-import { motion, AnimatePresence } from "motion/react";
+import { FileText, ArrowUp, ArrowDown, ArrowUpDown } from "lucide-react";
 import {
   Accordion,
   AccordionContent,
@@ -8,6 +8,8 @@ import {
   AccordionTrigger,
 } from "@/components/ui/accordion";
 import { Button } from "@/components/ui/button";
+import { getLinkEndpoints } from "@/lib/graph-utils";
+import { cn } from "@/lib/utils";
 import type {
   Node,
   Link,
@@ -18,6 +20,288 @@ import type {
   EvidenceItem,
   VariantItem,
 } from "@/types/graph";
+
+// ============ ViewSourceButton Component ============
+interface ViewSourceButtonProps {
+  onClick: () => void;
+  size?: "sm" | "default";
+  className?: string;
+}
+
+const ViewSourceButton: React.FC<ViewSourceButtonProps> = ({
+  onClick,
+  size = "default",
+  className,
+}) => {
+  const isSmall = size === "sm";
+  return (
+    <button
+      onClick={onClick}
+      className={cn(
+        "text-blue-500 hover:text-blue-700 flex items-center gap-1 transition-colors",
+        isSmall ? "text-[10px]" : "text-sm bg-gray-50 px-2 py-1 rounded hover:bg-blue-50",
+        className
+      )}
+    >
+      <FileText className={isSmall ? "w-3 h-3" : "w-4 h-4"} />
+      View Source
+    </button>
+  );
+};
+
+// ============ NodeCard Component ============
+type NodeCardVariant = "claim" | "observation" | "supports" | "contradicts" | "contextualizes" | "variant";
+
+const nodeCardStyles: Record<NodeCardVariant, string> = {
+  claim: "bg-orange-50 text-orange-900 border-orange-200",
+  observation: "bg-blue-50 text-blue-900 border-blue-200",
+  supports: "bg-green-50 text-green-800 border-green-200",
+  contradicts: "bg-red-50 text-red-800 border-red-200",
+  contextualizes: "bg-gray-50 text-gray-700 border-gray-200",
+  variant: "bg-purple-50 text-purple-900 border-purple-200",
+};
+
+const nodeCardBadgeStyles: Record<NodeCardVariant, string> = {
+  claim: "bg-orange-100 text-orange-700",
+  observation: "bg-blue-100 text-blue-700",
+  supports: "bg-green-100 text-green-700",
+  contradicts: "bg-red-100 text-red-700",
+  contextualizes: "bg-gray-200 text-gray-600",
+  variant: "bg-purple-100 text-purple-700",
+};
+
+interface NodeCardProps {
+  children: React.ReactNode;
+  variant: NodeCardVariant;
+  badge?: string;
+  onClick?: () => void;
+  className?: string;
+  size?: "sm" | "default";
+}
+
+const NodeCard: React.FC<NodeCardProps> = ({
+  children,
+  variant,
+  badge,
+  onClick,
+  className,
+  size = "default",
+}) => {
+  const Component = onClick ? "button" : "div";
+  const isSmall = size === "sm";
+
+  return (
+    <Component
+      onClick={onClick}
+      className={cn(
+        "w-full text-left rounded-lg leading-relaxed border",
+        isSmall ? "p-2 text-xs" : "p-3 text-sm",
+        nodeCardStyles[variant],
+        onClick && "hover:opacity-80 transition-colors cursor-pointer",
+        className
+      )}
+    >
+      {badge ? (
+        <div className="flex items-start gap-2">
+          <span className="flex-1">{children}</span>
+          <span
+            className={cn(
+              "text-[9px] font-medium px-1.5 py-0.5 rounded whitespace-nowrap flex-shrink-0",
+              nodeCardBadgeStyles[variant]
+            )}
+          >
+            {badge}
+          </span>
+        </div>
+      ) : (
+        children
+      )}
+    </Component>
+  );
+};
+
+// ============ EvidenceDistributionBar Component ============
+interface EvidenceDistributionBarProps {
+  counts: {
+    supports: number;
+    contradicts: number;
+    contextualizes: number;
+    total: number;
+  };
+}
+
+const EvidenceDistributionBar: React.FC<EvidenceDistributionBarProps> = ({ counts }) => {
+  if (counts.total === 0) return null;
+
+  return (
+    <>
+      <div className="flex-1 h-2 rounded-full overflow-hidden flex">
+        {counts.supports > 0 && (
+          <div
+            className="bg-green-500 h-full"
+            style={{ width: `${(counts.supports / counts.total) * 100}%` }}
+          />
+        )}
+        {counts.contradicts > 0 && (
+          <div
+            className="bg-red-500 h-full"
+            style={{ width: `${(counts.contradicts / counts.total) * 100}%` }}
+          />
+        )}
+        {counts.contextualizes > 0 && (
+          <div
+            className="bg-gray-400 h-full"
+            style={{ width: `${(counts.contextualizes / counts.total) * 100}%` }}
+          />
+        )}
+      </div>
+      <div className="flex gap-4 mt-1 text-[10px] text-gray-500">
+        {counts.supports > 0 && (
+          <span className="flex items-center gap-1">
+            <span className="w-2 h-2 rounded-full bg-green-500" />
+            {counts.supports} supporting
+          </span>
+        )}
+        {counts.contradicts > 0 && (
+          <span className="flex items-center gap-1">
+            <span className="w-2 h-2 rounded-full bg-red-500" />
+            {counts.contradicts} contradicting
+          </span>
+        )}
+        {counts.contextualizes > 0 && (
+          <span className="flex items-center gap-1">
+            <span className="w-2 h-2 rounded-full bg-gray-400" />
+            {counts.contextualizes} context
+          </span>
+        )}
+      </div>
+    </>
+  );
+};
+
+// ============ EvidenceLandscape Component ============
+interface EvidenceLandscapeProps {
+  node: Node;
+  evidenceData: EvidenceData;
+  methodsMap: Map<string, Method>;
+  isShowingEvidence: boolean;
+  allObservationsVisible: boolean;
+  onViewSource?: (nodeId: string) => void;
+  onToggleEvidence?: (claimId: string | null) => void;
+}
+
+const EvidenceLandscape: React.FC<EvidenceLandscapeProps> = ({
+  node,
+  evidenceData,
+  methodsMap,
+  isShowingEvidence,
+  allObservationsVisible,
+  onViewSource,
+  onToggleEvidence,
+}) => {
+  const getLinkTypeHeader = (linkType: string) => {
+    switch (linkType) {
+      case "supports":
+        return { text: "Supporting Evidence", colorClass: "text-green-600" };
+      case "contradicts":
+        return { text: "Contradicting Evidence", colorClass: "text-red-600" };
+      default:
+        return { text: "Contextual Evidence", colorClass: "text-gray-500" };
+    }
+  };
+
+  return (
+    <>
+      {/* Evidence Landscape Stats */}
+      <div>
+        <h5 className="mb-2">Evidence Landscape</h5>
+        <div className="flex items-center gap-2">
+          <span className="text-xs font-medium text-gray-600 bg-gray-100 px-2 py-1 rounded">
+            {evidenceData.counts.total}
+          </span>
+          <EvidenceDistributionBar counts={evidenceData.counts} />
+        </div>
+        {evidenceData.methodCount > 0 && (
+          <p className="mt-2 text-xs text-gray-500">
+            from {evidenceData.methodCount}{" "}
+            {evidenceData.methodCount === 1 ? "method" : "methods"}
+            {evidenceData.methodPaperCount > 1 ? (
+              <>
+                {" "}
+                <span className="font-semibold text-gray-800">
+                  across {evidenceData.methodPaperCount} papers
+                </span>
+              </>
+            ) : evidenceData.methodPaperCount === 1 &&
+              node.paperIds.length === 1 &&
+              evidenceData.methodPaperIds.has(node.paperIds[0]) ? (
+              <>
+                {" "}
+                from the <span className="font-semibold">same paper as the claim</span>
+              </>
+            ) : null}
+          </p>
+        )}
+        {evidenceData.counts.total > 0 && !allObservationsVisible && (
+          <Button
+            size="sm"
+            variant={isShowingEvidence ? "default" : "secondary"}
+            className="mt-2"
+            onClick={() => onToggleEvidence?.(isShowingEvidence ? null : node.id)}
+          >
+            {isShowingEvidence ? "Hide Evidence Landscape" : "Show Evidence Landscape for Claim"}
+          </Button>
+        )}
+      </div>
+
+      {/* Grouped Evidence */}
+      {evidenceData.grouped.size > 0 && (
+        <div className="flex flex-col gap-3">
+          {Array.from(evidenceData.grouped.entries()).map(([linkType, byMethod]) => {
+            const header = getLinkTypeHeader(linkType);
+            return (
+              <div key={linkType}>
+                <h5 className={cn("mb-2", header.colorClass)}>{header.text}</h5>
+                {Array.from(byMethod.entries()).map(([methodRef, items]) => {
+                  const method = methodRef !== "no_method" ? methodsMap.get(methodRef) : null;
+                  return (
+                    <div key={methodRef} className="mb-3">
+                      <div className="text-xs text-gray-600 mb-1.5 px-1 leading-relaxed">
+                        {method?.content.method_summary || "Unknown method"}
+                      </div>
+                      <Accordion type="multiple" className="flex flex-col gap-2">
+                        {items.map((item) => (
+                          <AccordionItem key={item.node.id} value={item.node.id} className="border-0">
+                            <NodeCard
+                              variant={linkType as NodeCardVariant}
+                              badge={item.node.observationType}
+                              size="sm"
+                            >
+                              {item.node.displayText}
+                            </NodeCard>
+                            <div className="flex items-center gap-2 py-1 px-1">
+                              <AccordionTrigger className="text-[10px] text-gray-500 hover:text-gray-700 hover:no-underline [&>svg]:size-3 py-0">
+                                Reasoning
+                              </AccordionTrigger>
+                              <ViewSourceButton size="sm" onClick={() => onViewSource?.(item.node.id)} />
+                            </div>
+                            <AccordionContent className="px-1 pb-2 pt-0 text-[11px] text-gray-600">
+                              {item.reasoning}
+                            </AccordionContent>
+                          </AccordionItem>
+                        ))}
+                      </Accordion>
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </>
+  );
+};
 
 // ============ NodeDetails Component ============
 interface NodeDetailsProps {
@@ -47,27 +331,18 @@ const NodeDetails: React.FC<NodeDetailsProps> = ({
 }) => {
   return (
     <div className="flex flex-col gap-4">
-      {/* Main node text */}
-      <div
-        className={`w-full text-left p-3 text-sm rounded-lg leading-relaxed ${
-          node.type === "claim"
-            ? "bg-orange-50 text-orange-900 border border-orange-200"
-            : "bg-blue-50 text-blue-900 border border-blue-200"
-        }`}
-      >
+      {/* Main node card */}
+      <NodeCard variant={node.type as NodeCardVariant}>
         {node.displayText}
-      </div>
+      </NodeCard>
 
       {/* Source Papers */}
       <div>
-        <h5 className="text-[10px] uppercase tracking-widest font-bold text-gray-500 mb-2">
-          Source {node.paperIds.length > 1 ? "Papers" : "Paper"}
-        </h5>
+        <h5 className="mb-2">Source {node.paperIds.length > 1 ? "Papers" : "Paper"}</h5>
         <div className="flex flex-col gap-1">
           {node.paperIds.map((paperId) => {
             const paper = papersMap.get(paperId);
-            const firstAuthorLastName =
-              paper?.authors?.[0]?.split(" ").pop() || null;
+            const firstAuthorLastName = paper?.authors?.[0]?.split(" ").pop() || null;
             const citation =
               firstAuthorLastName && paper?.year
                 ? `${firstAuthorLastName} et al. (${paper.year})`
@@ -81,29 +356,8 @@ const NodeDetails: React.FC<NodeDetailsProps> = ({
                 <p className="text-xs font-semibold text-gray-700 mb-0.5">
                   {paper?.title || paperId}
                 </p>
-                {citation && (
-                  <p className="text-xs text-gray-700 ">{citation}</p>
-                )}
-
-                <button
-                  onClick={() => onViewSource?.(node.id)}
-                  className="text-sm text-gray-700 bg-gray-50 px-2 py-1 rounded text-left hover:bg-blue-50 hover:text-blue-700 transition-colors cursor-pointer flex items-center gap-2 mt-1"
-                >
-                  <svg
-                    className="w-4 h-4 flex-shrink-0"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
-                    />
-                  </svg>
-                  View Source
-                </button>
+                {citation && <p className="text-xs text-gray-700">{citation}</p>}
+                <ViewSourceButton onClick={() => onViewSource?.(node.id)} className="mt-1" />
               </div>
             );
           })}
@@ -120,19 +374,14 @@ const NodeDetails: React.FC<NodeDetailsProps> = ({
             <AccordionContent className="pt-2">
               <Accordion type="multiple" className="flex flex-col gap-2">
                 {variantItems.map((item) => (
-                  <AccordionItem
-                    key={item.node.id}
-                    value={item.node.id}
-                    className="border-0"
-                  >
-                    {/* Variant card */}
-                    <button
+                  <AccordionItem key={item.node.id} value={item.node.id} className="border-0">
+                    <NodeCard
+                      variant="variant"
+                      size="sm"
                       onClick={() => onNodeSelect?.(item.node)}
-                      className="w-full text-left p-2 text-xs rounded-lg leading-relaxed bg-purple-50 text-purple-900 border border-purple-200 hover:bg-purple-100 transition-colors cursor-pointer"
                     >
                       {item.node.displayText}
-                    </button>
-                    {/* Reasoning accordion trigger */}
+                    </NodeCard>
                     <div className="flex items-center gap-2 py-1 px-1">
                       <AccordionTrigger className="text-[10px] text-gray-500 hover:text-gray-700 hover:no-underline [&>svg]:size-3 py-0">
                         Reasoning
@@ -151,215 +400,15 @@ const NodeDetails: React.FC<NodeDetailsProps> = ({
 
       {/* For Claims: Evidence Landscape */}
       {node.type === "claim" && evidenceData && (
-        <>
-          {/* Evidence Landscape Stats */}
-          <div>
-            <h5 className="text-[10px] uppercase tracking-widest font-bold text-gray-500 mb-2">
-              Evidence Landscape
-            </h5>
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-medium text-gray-600 bg-gray-100 px-2 py-1 rounded">
-                {evidenceData.counts.total}
-              </span>
-              {evidenceData.counts.total > 0 && (
-                <div className="flex-1 h-2 rounded-full overflow-hidden flex">
-                  {evidenceData.counts.supports > 0 && (
-                    <div
-                      className="bg-green-500 h-full"
-                      style={{
-                        width: `${(evidenceData.counts.supports / evidenceData.counts.total) * 100}%`,
-                      }}
-                    />
-                  )}
-                  {evidenceData.counts.contradicts > 0 && (
-                    <div
-                      className="bg-red-500 h-full"
-                      style={{
-                        width: `${(evidenceData.counts.contradicts / evidenceData.counts.total) * 100}%`,
-                      }}
-                    />
-                  )}
-                  {evidenceData.counts.contextualizes > 0 && (
-                    <div
-                      className="bg-gray-400 h-full"
-                      style={{
-                        width: `${(evidenceData.counts.contextualizes / evidenceData.counts.total) * 100}%`,
-                      }}
-                    />
-                  )}
-                </div>
-              )}
-            </div>
-            <div className="flex gap-4 mt-1 text-[10px] text-gray-500">
-              {evidenceData.counts.supports > 0 && (
-                <span className="flex items-center gap-1">
-                  <span className="w-2 h-2 rounded-full bg-green-500" />
-                  {evidenceData.counts.supports} supporting
-                </span>
-              )}
-              {evidenceData.counts.contradicts > 0 && (
-                <span className="flex items-center gap-1">
-                  <span className="w-2 h-2 rounded-full bg-red-500" />
-                  {evidenceData.counts.contradicts} contradicting
-                </span>
-              )}
-              {evidenceData.counts.contextualizes > 0 && (
-                <span className="flex items-center gap-1">
-                  <span className="w-2 h-2 rounded-full bg-gray-400" />
-                  {evidenceData.counts.contextualizes} context
-                </span>
-              )}
-            </div>
-            {evidenceData.methodCount > 0 && (
-              <p className="mt-2 text-xs text-gray-500">
-                from {evidenceData.methodCount}{" "}
-                {evidenceData.methodCount === 1 ? "method" : "methods"}
-                {evidenceData.methodPaperCount > 1 ? (
-                  <>
-                    {" "}
-                    <span className="font-semibold text-gray-800">
-                      across {evidenceData.methodPaperCount} papers
-                    </span>
-                  </>
-                ) : evidenceData.methodPaperCount === 1 &&
-                  node.paperIds.length === 1 &&
-                  evidenceData.methodPaperIds.has(node.paperIds[0]) ? (
-                  <>
-                    {" "}
-                    from the{" "}
-                    <span className="font-semibold">
-                      same paper as the claim
-                    </span>
-                  </>
-                ) : null}
-              </p>
-            )}
-            {evidenceData.counts.total > 0 && !allObservationsVisible && (
-              <Button
-                size="sm"
-                variant={isShowingEvidence ? "default" : "secondary"}
-                className="mt-2"
-                onClick={() =>
-                  onToggleEvidence?.(isShowingEvidence ? null : node.id)
-                }
-              >
-                {isShowingEvidence
-                  ? "Hide Evidence Landscape"
-                  : "Show Evidence Landscape for Claim"}
-              </Button>
-            )}
-          </div>
-
-          {/* Grouped Evidence */}
-          {evidenceData.grouped.size > 0 && (
-            <div className="flex flex-col gap-3">
-              {Array.from(evidenceData.grouped.entries()).map(
-                ([linkType, byMethod]) => (
-                  <div key={linkType}>
-                    <h5
-                      className={`text-[10px] uppercase tracking-widest font-bold mb-2 ${
-                        linkType === "supports"
-                          ? "text-green-600"
-                          : linkType === "contradicts"
-                            ? "text-red-600"
-                            : "text-gray-500"
-                      }`}
-                    >
-                      {linkType === "supports"
-                        ? "Supporting Evidence"
-                        : linkType === "contradicts"
-                          ? "Contradicting Evidence"
-                          : "Contextual Evidence"}
-                    </h5>
-                    {Array.from(byMethod.entries()).map(([methodRef, items]) => {
-                      const method =
-                        methodRef !== "no_method"
-                          ? methodsMap.get(methodRef)
-                          : null;
-                      return (
-                        <div key={methodRef} className="mb-3">
-                          <div className="text-xs text-gray-600 mb-1.5 px-1 leading-relaxed">
-                            {method?.content.method_summary || "Unknown method"}
-                          </div>
-                          <Accordion
-                            type="multiple"
-                            className="flex flex-col gap-2"
-                          >
-                            {items.map((item) => (
-                              <AccordionItem
-                                key={item.node.id}
-                                value={item.node.id}
-                                className="border-0"
-                              >
-                                {/* Observation card */}
-                                <div
-                                  className={`w-full text-left p-2 text-xs rounded-lg leading-relaxed ${
-                                    linkType === "supports"
-                                      ? "bg-green-50 text-green-800 border border-green-200"
-                                      : linkType === "contradicts"
-                                        ? "bg-red-50 text-red-800 border border-red-200"
-                                        : "bg-gray-50 text-gray-700 border border-gray-200"
-                                  }`}
-                                >
-                                  <div className="flex items-start gap-2">
-                                    <span className="flex-1">
-                                      {item.node.displayText}
-                                    </span>
-                                    {item.node.observationType && (
-                                      <span
-                                        className={`text-[9px] font-medium px-1.5 py-0.5 rounded whitespace-nowrap flex-shrink-0 ${
-                                          linkType === "supports"
-                                            ? "bg-green-100 text-green-700"
-                                            : linkType === "contradicts"
-                                              ? "bg-red-100 text-red-700"
-                                              : "bg-gray-200 text-gray-600"
-                                        }`}
-                                      >
-                                        {item.node.observationType}
-                                      </span>
-                                    )}
-                                  </div>
-                                </div>
-                                {/* Actions below the card */}
-                                <div className="flex items-center gap-2 py-1 px-1">
-                                  <AccordionTrigger className="text-[10px] text-gray-500 hover:text-gray-700 hover:no-underline [&>svg]:size-3 py-0">
-                                    Reasoning
-                                  </AccordionTrigger>
-                                  <button
-                                    onClick={() => onViewSource?.(item.node.id)}
-                                    className="text-[10px] text-blue-500 hover:text-blue-700 flex items-center gap-1"
-                                  >
-                                    <svg
-                                      className="w-3 h-3"
-                                      fill="none"
-                                      stroke="currentColor"
-                                      viewBox="0 0 24 24"
-                                    >
-                                      <path
-                                        strokeLinecap="round"
-                                        strokeLinejoin="round"
-                                        strokeWidth={2}
-                                        d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
-                                      />
-                                    </svg>
-                                    View Source
-                                  </button>
-                                </div>
-                                <AccordionContent className="px-1 pb-2 pt-0 text-[11px] text-gray-600">
-                                  {item.reasoning}
-                                </AccordionContent>
-                              </AccordionItem>
-                            ))}
-                          </Accordion>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )
-              )}
-            </div>
-          )}
-        </>
+        <EvidenceLandscape
+          node={node}
+          evidenceData={evidenceData}
+          methodsMap={methodsMap}
+          isShowingEvidence={isShowingEvidence}
+          allObservationsVisible={allObservationsVisible}
+          onViewSource={onViewSource}
+          onToggleEvidence={onToggleEvidence}
+        />
       )}
     </div>
   );
@@ -372,15 +421,19 @@ interface EdgeDetailsProps {
   onViewSource?: (nodeId: string) => void;
 }
 
+const linkTypeBadgeStyles: Record<string, string> = {
+  supports: "text-green-600 bg-green-100",
+  contradicts: "text-red-600 bg-red-100",
+  premise: "text-blue-600 bg-blue-100",
+  variant: "text-purple-600 bg-purple-100",
+};
+
 const EdgeDetails: React.FC<EdgeDetailsProps> = ({
   link,
   graphData,
   onViewSource,
 }) => {
-  const sourceId =
-    typeof link.source === "object" ? link.source.id : link.source;
-  const targetId =
-    typeof link.target === "object" ? link.target.id : link.target;
+  const { src: sourceId, tgt: targetId } = getLinkEndpoints(link);
 
   const sourceNode = graphData.nodes.find((n) => n.id === sourceId);
   const targetNode = graphData.nodes.find((n) => n.id === targetId);
@@ -400,103 +453,45 @@ const EdgeDetails: React.FC<EdgeDetailsProps> = ({
   const firstLabel = isClaimToObs ? "To" : "From";
   const secondLabel = isClaimToObs ? "From" : "To";
 
-  const getLinkTypeColor = (linkType: string) => {
-    switch (linkType) {
-      case "supports":
-        return "text-green-600 bg-green-100";
-      case "contradicts":
-        return "text-red-600 bg-red-100";
-      case "premise":
-        return "text-blue-600 bg-blue-100";
-      case "variant":
-        return "text-purple-600 bg-purple-100";
-      default:
-        return "text-gray-600 bg-gray-100";
-    }
-  };
-
-  const getNodeStyle = (node: Node | undefined) => {
-    if (!node) return "bg-gray-50 text-gray-700 border border-gray-200";
-    return node.type === "claim"
-      ? "bg-orange-50 text-orange-900 border border-orange-200"
-      : "bg-blue-50 text-blue-900 border border-blue-200";
+  const getNodeVariant = (node: Node | undefined): NodeCardVariant => {
+    if (!node) return "contextualizes"; // fallback gray style
+    return node.type as NodeCardVariant;
   };
 
   return (
     <div className="flex flex-col gap-4">
       {/* First Node */}
       <div>
-        <h5 className="text-[10px] uppercase tracking-widest font-bold text-gray-500 mb-2">
-          {firstLabel}
-        </h5>
-        <div
-          className={`w-full text-left p-3 text-sm rounded-lg leading-relaxed ${getNodeStyle(firstNode)}`}
+        <h5 className="mb-2">{firstLabel}</h5>
+        <NodeCard
+          variant={getNodeVariant(firstNode)}
+          badge={firstNode?.type.toUpperCase()}
         >
-          <div className="flex items-start gap-2">
-            <span className="flex-1">
-              {firstNode?.displayText || sourceId}
-            </span>
-            {firstNode && (
-              <span
-                className={`text-[9px] font-medium px-1.5 py-0.5 rounded whitespace-nowrap flex-shrink-0 ${
-                  firstNode.type === "claim"
-                    ? "bg-orange-100 text-orange-700"
-                    : "bg-blue-100 text-blue-700"
-                }`}
-              >
-                {firstNode.type.toUpperCase()}
-              </span>
-            )}
-          </div>
-        </div>
+          {firstNode?.displayText || sourceId}
+        </NodeCard>
         {firstNode && (
-          <button
+          <ViewSourceButton
+            size="sm"
             onClick={() => onViewSource?.(firstNode.id)}
-            className="mt-1 text-[10px] text-blue-500 hover:text-blue-700 flex items-center gap-1"
-          >
-            <svg
-              className="w-3 h-3"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
-              />
-            </svg>
-            View Source
-          </button>
+            className="mt-1"
+          />
         )}
       </div>
 
       {/* Arrow indicator with link type badge */}
       <div className="flex justify-center items-center gap-2">
-        <svg
-          className="text-gray-900"
-          width="24"
-          height="24"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-        >
-          {link.linkType === "variant" ? (
-            <>
-              <path d="M12 5v14" />
-              <path d="M5 9l7-4 7 4" />
-              <path d="M5 15l7 4 7-4" />
-            </>
-          ) : isClaimToObs ? (
-            <path d="M12 19V5M5 12l7-7 7 7" />
-          ) : (
-            <path d="M12 5v14M5 12l7 7 7-7" />
-          )}
-        </svg>
+        {link.linkType === "variant" ? (
+          <ArrowUpDown className="w-5 h-5 text-gray-900" />
+        ) : isClaimToObs ? (
+          <ArrowUp className="w-5 h-5 text-gray-900" />
+        ) : (
+          <ArrowDown className="w-5 h-5 text-gray-900" />
+        )}
         <span
-          className={`text-xs font-medium px-2 py-1 rounded ${getLinkTypeColor(link.linkType)}`}
+          className={cn(
+            "text-xs font-medium px-2 py-1 rounded",
+            linkTypeBadgeStyles[link.linkType] || "text-gray-600 bg-gray-100"
+          )}
         >
           {link.linkType.toUpperCase()}
         </span>
@@ -504,58 +499,26 @@ const EdgeDetails: React.FC<EdgeDetailsProps> = ({
 
       {/* Second Node */}
       <div>
-        <h5 className="text-[10px] uppercase tracking-widest font-bold text-gray-500 mb-2">
-          {secondLabel}
-        </h5>
-        <div
-          className={`w-full text-left p-3 text-sm rounded-lg leading-relaxed ${getNodeStyle(secondNode)}`}
+        <h5 className="mb-2">{secondLabel}</h5>
+        <NodeCard
+          variant={getNodeVariant(secondNode)}
+          badge={secondNode?.type.toUpperCase()}
         >
-          <div className="flex items-start gap-2">
-            <span className="flex-1">
-              {secondNode?.displayText || targetId}
-            </span>
-            {secondNode && (
-              <span
-                className={`text-[9px] font-medium px-1.5 py-0.5 rounded whitespace-nowrap flex-shrink-0 ${
-                  secondNode.type === "claim"
-                    ? "bg-orange-100 text-orange-700"
-                    : "bg-blue-100 text-blue-700"
-                }`}
-              >
-                {secondNode.type.toUpperCase()}
-              </span>
-            )}
-          </div>
-        </div>
+          {secondNode?.displayText || targetId}
+        </NodeCard>
         {secondNode && (
-          <button
+          <ViewSourceButton
+            size="sm"
             onClick={() => onViewSource?.(secondNode.id)}
-            className="mt-1 text-[10px] text-blue-500 hover:text-blue-700 flex items-center gap-1"
-          >
-            <svg
-              className="w-3 h-3"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
-              />
-            </svg>
-            View Source
-          </button>
+            className="mt-1"
+          />
         )}
       </div>
 
       {/* Reasoning */}
       {link.reasoning && (
         <div>
-          <h5 className="text-[10px] uppercase tracking-widest font-bold text-gray-500 mb-2">
-            Reasoning
-          </h5>
+          <h5 className="mb-2">Reasoning</h5>
           <div className="text-sm text-gray-700 bg-gray-50 p-3 rounded-lg leading-relaxed border border-gray-200">
             {link.reasoning}
           </div>
@@ -610,10 +573,7 @@ export const ElementPanel: React.FC<ElementPanelProps> = ({
     graphData.links.forEach((link) => {
       if (link.linkCategory !== "claim_to_observation") return;
 
-      const src =
-        typeof link.source === "object" ? link.source.id : link.source;
-      const tgt =
-        typeof link.target === "object" ? link.target.id : link.target;
+      const { src, tgt } = getLinkEndpoints(link);
 
       let obsId: string | null = null;
       if (src === panelNode.id) obsId = tgt;
@@ -684,10 +644,7 @@ export const ElementPanel: React.FC<ElementPanelProps> = ({
     graphData.links.forEach((link) => {
       if (link.linkType !== "variant") return;
 
-      const src =
-        typeof link.source === "object" ? link.source.id : link.source;
-      const tgt =
-        typeof link.target === "object" ? link.target.id : link.target;
+      const { src, tgt } = getLinkEndpoints(link);
 
       let variantId: string | null = null;
       if (src === panelNode.id) variantId = tgt;
@@ -717,55 +674,35 @@ export const ElementPanel: React.FC<ElementPanelProps> = ({
         )}
 
         {/* Panel Content */}
-        <AnimatePresence mode="wait">
-          {panelLink && graphData ? (
-            <motion.div
-              key={`link-${typeof panelLink.source === "object" ? panelLink.source.id : panelLink.source}-${typeof panelLink.target === "object" ? panelLink.target.id : panelLink.target}`}
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="flex-1 mt-4 overflow-y-auto"
-            >
-              <EdgeDetails
-                link={panelLink}
-                graphData={graphData}
-                onViewSource={onViewSource}
-              />
-            </motion.div>
-          ) : panelNode ? (
-            <motion.div
-              key={panelNode.id}
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="flex-1 mt-4 overflow-y-auto"
-            >
-              <NodeDetails
-                node={panelNode}
-                papersMap={papersMap}
-                methodsMap={methodsMap}
-                evidenceData={evidenceData}
-                variantItems={variantItems}
-                isShowingEvidence={showEvidenceForClaimId === panelNode.id}
-                allObservationsVisible={showObservations}
-                onViewSource={onViewSource}
-                onNodeSelect={onNodeSelect}
-                onToggleEvidence={onToggleEvidence}
-              />
-            </motion.div>
-          ) : (
-            <motion.div
-              key="empty"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="flex-1 mt-4 flex items-center justify-center text-gray-600 text-center"
-            >
-              Hover over a node or edge to see details. Click on it to pin them
-              here.
-            </motion.div>
-          )}
-        </AnimatePresence>
+        {panelLink && graphData ? (
+          <div className="flex-1 mt-4 overflow-y-auto">
+            <EdgeDetails
+              link={panelLink}
+              graphData={graphData}
+              onViewSource={onViewSource}
+            />
+          </div>
+        ) : panelNode ? (
+          <div className="flex-1 mt-4 overflow-y-auto">
+            <NodeDetails
+              node={panelNode}
+              papersMap={papersMap}
+              methodsMap={methodsMap}
+              evidenceData={evidenceData}
+              variantItems={variantItems}
+              isShowingEvidence={showEvidenceForClaimId === panelNode.id}
+              allObservationsVisible={showObservations}
+              onViewSource={onViewSource}
+              onNodeSelect={onNodeSelect}
+              onToggleEvidence={onToggleEvidence}
+            />
+          </div>
+        ) : (
+          <div className="flex-1 mt-4 flex items-center justify-center text-gray-600 text-center">
+            Hover over a node or edge to see details. Click on it to pin them
+            here.
+          </div>
+        )}
       </div>
     </div>
   );

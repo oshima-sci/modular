@@ -8,6 +8,7 @@ import {
   computeClaimEvidenceCounts,
   computeNeighborNodeIds,
   isContradictionLink,
+  getLinkEndpoints,
 } from "@/lib/graph-utils";
 
 type GraphRef = ForceGraphMethods<Node, Link>;
@@ -21,13 +22,6 @@ const WEAK_PREMISE_DISTANCE_MULTIPLIER = 1.5;
 // Linear interpolation helper
 function lerp(a: number, b: number, t: number): number {
   return a + t * (b - a);
-}
-
-// Extract source/target IDs from a link (handles both string and object forms)
-function getLinkEndpoints(link: Link): { src: string; tgt: string } {
-  const src = typeof link.source === "object" ? link.source.id : link.source;
-  const tgt = typeof link.target === "object" ? link.target.id : link.target;
-  return { src: src as string, tgt: tgt as string };
 }
 
 // Check if a link matches the given active link

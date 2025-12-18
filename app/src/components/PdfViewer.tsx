@@ -116,7 +116,7 @@ export default function PdfViewer({ pdfUrl, bboxes = [], highlightedId, onBboxCl
               />
               {dims && pageWidth && pageBoxes.map(bbox => {
                 const scale = pageWidth / dims.width;
-                // Assuming y is from top (if from bottom, use: dims.height - bbox.y - bbox.height)
+                // Assuming y is from top
                 const style = {
                   left: bbox.x * scale,
                   top: bbox.y * scale,

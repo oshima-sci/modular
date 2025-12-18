@@ -197,6 +197,15 @@ export function isContradictionLink(link: Link): boolean {
 }
 
 /**
+ * Extract source and target IDs from a link (handles both string and object forms).
+ */
+export function getLinkEndpoints(link: Link): { src: string; tgt: string } {
+  const src = typeof link.source === "object" ? link.source.id : link.source;
+  const tgt = typeof link.target === "object" ? link.target.id : link.target;
+  return { src: src as string, tgt: tgt as string };
+}
+
+/**
  * Graph colors (hex values matching Tailwind palette for canvas rendering).
  * Keep in sync with Tailwind classes used in ElementPanel.tsx.
  */
