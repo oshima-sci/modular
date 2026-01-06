@@ -96,3 +96,36 @@ cd api && uv run python worker.py --workers 4
 - Frontend: http://localhost:5173
 - Backend: http://localhost:8000
 - API Docs: http://localhost:8000/docs
+
+## Tech Stack
+
+**Frontend**
+- React 18 + TypeScript - Type-safe UI components
+- Vite - Fast development and build tooling
+- TanStack Query - Server state management with automatic caching
+- react-force-graph-2d - Interactive knowledge graph visualization
+- Tailwind CSS - Utility-first styling
+
+**Backend**
+- FastAPI - Modern Python web framework with auto-generated OpenAPI docs
+- DSPy - LLM orchestration for extraction and linking pipelines
+- Pydantic - Runtime type validation and serialization
+- uv - Fast Python package management
+- Grobid - Academic PDF parsing service
+
+**Infrastructure**
+- Supabase - Managed PostgreSQL + S3-compatible file storage
+- Docker - Containerized deployment for API and dependencies
+- Postgres job queue - Async task processing with multiprocessing workers
+
+**Architecture Notes**
+
+The backend uses a job queue pattern to handle long-running ML tasks:
+- Papers are uploaded and stored in Supabase
+- Jobs are created in Postgres for parsing, extraction, and linking
+- Multiple worker processes claim and execute jobs in parallel
+- Each job type (parse, extract, link) runs independently and updates the database
+
+This architecture allows the API to respond immediately while heavy processing happens asynchronously. The extraction pipeline uses DSPy to orchestrate Claude API calls, pulling structured claims/methods/observations from parsed PDFs, then cross-linking them across the entire library.
+
+API documentation is auto-generated from FastAPI route definitions at `/docs` using OpenAPI/Swagger.
