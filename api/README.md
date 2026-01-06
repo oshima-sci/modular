@@ -76,11 +76,12 @@ Run the API and Grobid parser in containers while connecting to Supabase for dat
 
 1. **Configure environment**
    ```bash
-   cp api/.env.example api/.env
-   # Edit api/.env with your Supabase credentials and Anthropic API key
+   cd api
+   cp .env.example .env
+   # Edit .env with your Supabase credentials and Anthropic API key
    ```
 
-2. **Start services** (from repo root)
+2. **Start services**
    ```bash
    docker-compose up
    ```

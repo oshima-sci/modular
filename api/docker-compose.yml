@@ -8,12 +8,12 @@ services:
   # FastAPI backend + workers
   api:
     build:
-      context: ./api
+      context: .
       dockerfile: Dockerfile
     ports:
       - "8000:8000"
     env_file:
-      - ./api/.env
+      - .env
     environment:
       # Override Grobid URL to use Docker network
       GROBID_URL: http://grobid:8070

@@ -64,7 +64,7 @@ See [GROBID documentation](https://grobid.readthedocs.io/) for more options.
 
 **Option 1: Docker (Recommended for Quick Setup)**
 ```bash
-docker-compose up
+cd api && docker-compose up
 ```
 See [API README](api/README.md#docker-setup-optional) for Docker prerequisites and details.
 
