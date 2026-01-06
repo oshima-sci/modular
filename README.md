@@ -120,7 +120,7 @@ cd api && uv run python worker.py --workers 4
 
 **Architecture Notes**
 
-The backend uses a job queue pattern to handle long-running ML tasks:
+The backend uses a job queue pattern to handle long-running LLM calls:
 - Papers are uploaded and stored in Supabase
 - Jobs are created in Postgres for parsing, extraction, and linking
 - Multiple worker processes claim and execute jobs in parallel
