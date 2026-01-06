@@ -1,0 +1,22 @@
+services:
+  # Grobid PDF parser
+  grobid:
+    image: lfoppiano/grobid:0.8.1
+    ports:
+      - "8070:8070"
+
+  # FastAPI backend + workers
+  api:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    env_file:
+      - ./api/.env
+    environment:
+      # Override Grobid URL to use Docker network
+      GROBID_URL: http://grobid:8070
+    depends_on:
+      - grobid
+    restart: unless-stopped

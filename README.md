@@ -23,7 +23,7 @@ We're using jobs on the DB and parallel workers to make this more efficient.
 
 ## Why it does this
 
-Scientific communication is hamstrung by an outdated medium: papers. Communicating knowledge in more granular iterations would significantly speeed up progress. A more granular medium also allows more efficient LLM-based reasoning and opens up new design space for metrics of scientific merit, ultimately enabling us to move beyond citations and journal prestige as proxies of quality of work. [Learn more](https://oshimascience.com/)
+Scientific communication is hamstrung by an outdated medium: papers. Communicating knowledge in more granular iterations would significantly speed up progress. A more granular medium also allows more efficient LLM-based reasoning and opens up new design space for metrics of scientific merit, ultimately enabling us to move beyond citations and journal prestige as proxies of quality of work. [Learn more](https://oshimascience.com/)
 Modular lets researchers process their existing research libraries into graphs of claims and evidence to begin shifting the understanding of and narrative around what scientific output could be.
 
 ## Structure
@@ -61,6 +61,14 @@ docker run --rm -p 8070:8070 lfoppiano/grobid:0.8.1
 See [GROBID documentation](https://grobid.readthedocs.io/) for more options.
 
 ## Running
+
+**Option 1: Docker (Recommended for Quick Setup)**
+```bash
+docker-compose up
+```
+See [API README](api/README.md#docker-setup-optional) for Docker prerequisites and details.
+
+**Option 2: Local Development**
 
 **Frontend** (Terminal 1):
 ```bash

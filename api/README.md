@@ -62,9 +62,50 @@ uv run python worker.py --workers 4           # Workers only
 npm run dev  # Frontend + API (no workers)
 ```
 
+## Docker Setup (Optional)
+
+Run the API and Grobid parser in containers while connecting to Supabase for database and file storage.
+
+### Prerequisites
+- Docker Desktop
+- Supabase project ([create one free](https://supabase.com))
+  - Apply migrations from `supabase/migrations/` to set up the database schema
+  - Copy your project credentials (URL, service role key, database URL)
+
+### Quick Start
+
+1. **Configure environment**
+   ```bash
+   cp api/.env.example api/.env
+   # Edit api/.env with your Supabase credentials and Anthropic API key
+   ```
+
+2. **Start services** (from repo root)
+   ```bash
+   docker-compose up
+   ```
+
+   This runs:
+   - API server + background workers (containerized)
+   - Grobid PDF parser (containerized)
+   - Connected to your Supabase instance (managed database + file storage)
+
+3. **Access**
+   - API: http://localhost:8000
+   - API docs: http://localhost:8000/docs
+   - Grobid: http://localhost:8070
+
+### Why Database Isn't Containerized
+
+The API requires a database for all operations - the extraction and linking pipeline stores intermediate results, job queue state, and cross-paper relationships in Postgres. We use Supabase's managed Postgres + S3-like storage for PDFs rather than running these in containers because:
+
+1. **Production-realistic setup** - Managed databases/storage are standard for deployed applications
+2. **Stateful data** - Papers, extracts, and links persist across container restarts
+3. **File storage** - Supabase Storage provides S3-compatible API for PDFs (could be swapped for actual S3/MinIO in other deployments)
+
 ## Key Dependencies
 
 - **FastAPI** - Web framework
 - **DSPy** - LLM orchestration for extraction and linking
 - **Grobid** - PDF parsing (requires separate Grobid server)
-- **Supabase** - PostgreSQL database
+- **Supabase** - PostgreSQL database + S3-like file storage
