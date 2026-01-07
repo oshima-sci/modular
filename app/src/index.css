@@ -66,10 +66,16 @@ body {
 }
 
 h1 {
-  font-size: 3.2em;
+  font-size: 2.2em;
   line-height: 1.1;
+  font-weight: bold;
 }
 
+h3 {
+  font-size: 1.2em;
+  line-height: 1.1;
+  font-weight: 600;
+}
 
 @media (prefers-color-scheme: light) {
   :root {

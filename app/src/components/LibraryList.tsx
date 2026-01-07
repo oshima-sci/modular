@@ -3,7 +3,8 @@ import { useLibraries } from "@/hooks/useLibraries";
 import { Card, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { ArrowRight } from "lucide-react";
-import PaperUploader from "./PaperUploader";
+import PaperUploader from "@/components/PaperUploader";
+import IntroSection from "@/components/IntroSection";
 
 export default function LibraryList() {
   const navigate = useNavigate();
@@ -16,6 +17,7 @@ export default function LibraryList() {
     <div className="h-screen w-screen overflow-hidden">
       <div className="uppercase p-2 text-black font-semibold">Modular</div>
       <div className="max-w-2xl mx-auto p-8 space-y-16 h-full overflow-y-auto pb-64">
+        <IntroSection/>
         <div className="flex flex-col gap-2">
           <h3>Create a Modular library by uploading papers</h3>
           <PaperUploader
