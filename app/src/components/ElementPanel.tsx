@@ -53,7 +53,7 @@ const ViewSourceButton: React.FC<ViewSourceButtonProps> = ({
 type NodeCardVariant = "claim" | "observation" | "supports" | "contradicts" | "contextualizes" | "variant";
 
 const nodeCardStyles: Record<NodeCardVariant, string> = {
-  claim: "bg-orange-50 text-orange-900 border-orange-200",
+  claim: "bg-orange-50 text-orange-900 border-orange-200 sticky top-0",
   observation: "bg-blue-50 text-blue-900 border-blue-200",
   supports: "bg-green-50 text-green-800 border-green-200",
   contradicts: "bg-red-50 text-red-800 border-red-200",
@@ -266,48 +266,54 @@ const EvidenceLandscape: React.FC<EvidenceLandscapeProps> = ({
 
       {/* Grouped Evidence */}
       {evidenceData.grouped.size > 0 && (
-        <div className="flex flex-col gap-3">
+        <Accordion type="multiple" defaultValue={Array.from(evidenceData.grouped.keys())} className="flex flex-col gap-3">
           {Array.from(evidenceData.grouped.entries()).map(([linkType, byMethod]) => {
             const header = getLinkTypeHeader(linkType);
+            const totalItems = Array.from(byMethod.values()).reduce((sum, items) => sum + items.length, 0);
             return (
-              <div key={linkType}>
-                <h5 className={cn("mb-2", header.colorClass)}>{header.text}</h5>
-                {Array.from(byMethod.entries()).map(([methodRef, items]) => {
-                  const method = methodRef !== "no_method" ? methodsMap.get(methodRef) : null;
-                  return (
-                    <div key={methodRef} className="mb-3">
-                      <div className="text-xs text-gray-600 mb-1.5 px-1 leading-relaxed">
-                        {method?.content.method_summary || "Unknown method"}
+              <AccordionItem key={linkType} value={linkType} className="border-0">
+                <AccordionTrigger className={cn("text-sm font-semibold hover:no-underline py-0 pb-2", header.colorClass)}>
+                  {header.text} ({totalItems})
+                </AccordionTrigger>
+                <AccordionContent>
+                  {Array.from(byMethod.entries()).map(([methodRef, items]) => {
+                    const method = methodRef !== "no_method" ? methodsMap.get(methodRef) : null;
+                    return (
+                      <div key={methodRef} className="mb-3">
+                        <div className="text-xs text-gray-600 mb-1.5 leading-relaxed">
+                          <span className="font-semibold">Source method: </span>
+                          {method?.content.method_summary || "Unknown method"}
+                        </div>
+                        <Accordion type="multiple" className="flex flex-col gap-2 pl-2">
+                          {items.map((item) => (
+                            <AccordionItem key={item.node.id} value={item.node.id} className="border-0">
+                              <NodeCard
+                                variant={linkType as NodeCardVariant}
+                                badge={item.node.observationType}
+                                size="sm"
+                              >
+                                {item.node.displayText}
+                              </NodeCard>
+                              <div className="flex items-center gap-2 py-1 px-1">
+                                <AccordionTrigger className="text-[10px] text-gray-500 hover:text-gray-700 hover:no-underline [&>svg]:size-3 py-0">
+                                  Reasoning
+                                </AccordionTrigger>
+                                <ViewSourceButton size="sm" onClick={() => onViewSource?.(item.node.id)} />
+                              </div>
+                              <AccordionContent className="px-1 pb-2 pt-0 text-[11px] text-gray-600">
+                                {item.reasoning}
+                              </AccordionContent>
+                            </AccordionItem>
+                          ))}
+                        </Accordion>
                       </div>
-                      <Accordion type="multiple" className="flex flex-col gap-2">
-                        {items.map((item) => (
-                          <AccordionItem key={item.node.id} value={item.node.id} className="border-0">
-                            <NodeCard
-                              variant={linkType as NodeCardVariant}
-                              badge={item.node.observationType}
-                              size="sm"
-                            >
-                              {item.node.displayText}
-                            </NodeCard>
-                            <div className="flex items-center gap-2 py-1 px-1">
-                              <AccordionTrigger className="text-[10px] text-gray-500 hover:text-gray-700 hover:no-underline [&>svg]:size-3 py-0">
-                                Reasoning
-                              </AccordionTrigger>
-                              <ViewSourceButton size="sm" onClick={() => onViewSource?.(item.node.id)} />
-                            </div>
-                            <AccordionContent className="px-1 pb-2 pt-0 text-[11px] text-gray-600">
-                              {item.reasoning}
-                            </AccordionContent>
-                          </AccordionItem>
-                        ))}
-                      </Accordion>
-                    </div>
-                  );
-                })}
-              </div>
+                    );
+                  })}
+                </AccordionContent>
+              </AccordionItem>
             );
           })}
-        </div>
+        </Accordion>
       )}
     </>
   );
@@ -367,7 +373,7 @@ const NodeDetails: React.FC<NodeDetailsProps> = ({
                   {paper?.title || paperId}
                 </p>
                 {citation && <p className="text-xs text-gray-700">{citation}</p>}
-                <ViewSourceButton onClick={() => onViewSource?.(node.id)} className="mt-1" />
+                <ViewSourceButton size="sm" onClick={() => onViewSource?.(node.id)} className="mt-1" />
               </div>
             );
           })}
@@ -386,7 +392,7 @@ const NodeDetails: React.FC<NodeDetailsProps> = ({
                 {variantItems.map((item) => (
                   <AccordionItem key={item.node.id} value={item.node.id} className="border-0">
                     <NodeCard
-                      variant="variant"
+                      variant="claim"
                       size="sm"
                       onClick={() => onNodeSelect?.(item.node)}
                     >
