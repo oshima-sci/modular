@@ -1,4 +1,6 @@
-import { AccordionTrigger, Accordion, AccordionContent, AccordionItem } from "./ui/accordion"
+import { AccordionTrigger, Accordion, AccordionContent, AccordionItem } from "@/components/ui/accordion"
+import { Button } from "@/components/ui/button"
+import { ExternalLink } from "lucide-react"
 
 export default function IntroSection(){
     return(
@@ -17,6 +19,17 @@ export default function IntroSection(){
                         different paper. Find contradictions among claims, and guage the empirical support
                         across the literature for a given claim.
                     </p>
+                    <a
+                        href="https://oshimascience.com/#metascience"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-black"
+                    >
+                        <Button variant="outline" size="sm">
+                            <ExternalLink/>
+                            Learn more
+                        </Button>
+                    </a>
                 </AccordionContent>
             </AccordionItem>
         </Accordion>
